@@ -1,0 +1,6 @@
+{
+  "name": "Degree Tour Memories 3.0",
+  "description": "Interactive photo gallery, tour timeline, batch directory, interactive spot map, and memory journal for Degree Tour 3.0",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

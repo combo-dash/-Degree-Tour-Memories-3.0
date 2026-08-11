@@ -1,0 +1,49 @@
+{
+  "entities": {
+    "memories": {
+      "title": "string",
+      "description": "string",
+      "category": "string",
+      "authorName": "string",
+      "authorRole": "string",
+      "imageUrl": "string",
+      "location": "string",
+      "date": "string",
+      "timestamp": "timestamp",
+      "likes": "number",
+      "likedBy": "array",
+      "tags": "array",
+      "comments": "array"
+    },
+    "batchmates": {
+      "name": "string",
+      "nickName": "string",
+      "rollNo": "string",
+      "section": "string",
+      "quote": "string",
+      "photoUrl": "string",
+      "favoriteMemory": "string",
+      "phone": "string",
+      "socialLink": "string",
+      "awards": "array"
+    },
+    "tourSpots": {
+      "name": "string",
+      "locationName": "string",
+      "day": "number",
+      "description": "string",
+      "latitude": "number",
+      "longitude": "number",
+      "highlightPhoto": "string",
+      "tips": "string"
+    },
+    "schedule": {
+      "dayNumber": "number",
+      "title": "string",
+      "time": "string",
+      "location": "string",
+      "details": "string",
+      "icon": "string"
+    }
+  }
+}
