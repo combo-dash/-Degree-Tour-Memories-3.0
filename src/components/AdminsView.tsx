@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Lock, Trash2, Plus, UserCheck, ShieldAlert, User } from 'lucide-react';
 import { UserSession } from './AuthScreen';
 import { getPublicAdminAvatar } from '../utils/adminAvatars';
-import { subscribeUsers, addUserToFirestore, deleteUserFromFirestore } from '../firebase';
+import { subscribeUsers, addUserToFirestore, disableUserInFirestore } from '../firebase';
 import { AppUser } from '../types';
 
 interface AdminMember {
@@ -23,7 +23,7 @@ const INITIAL_ADMINS: AdminMember[] = [
     email: 'tanvirtuhin482@gmail.com',
     role: 'superadmin',
     assignedModule: 'Central Executive Committee',
-    phone: '01712-345678',
+    phone: '01793-439488',
     password: 'Tanvir@tuhin-88'
   }
 ];
@@ -128,8 +128,8 @@ export const AdminsView: React.FC<AdminsViewProps> = ({ currentUser }) => {
   const handleDeleteAdmin = (id: string) => {
     if (!isSuperAdmin) return;
     
-    // Remove from Firestore
-    deleteUserFromFirestore(id);
+    // Disable in Firestore
+    disableUserInFirestore(id);
   };
 
   return (
@@ -158,7 +158,9 @@ export const AdminsView: React.FC<AdminsViewProps> = ({ currentUser }) => {
 
       {/* Admin Member Cards */}
       <div className="space-y-4">
-        {displayAdmins.map((adm) => (
+        {displayAdmins.map((adm) => {
+          if (!adm) return null;
+          return (
           <div
             key={adm.id}
             className="p-5 sm:p-6 rounded-3xl bg-slate-900/90 border border-slate-800 space-y-3 shadow-lg relative"
@@ -176,12 +178,12 @@ export const AdminsView: React.FC<AdminsViewProps> = ({ currentUser }) => {
                     />
                   ) : (
                     <div className="w-12 h-12 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md font-bold">
-                      {adm.name.charAt(0)}
+                      {adm.name?.charAt(0) || '?'}
                     </div>
                   );
                 })()}
                 <div>
-                  <h3 className="text-sm sm:text-base font-bold text-white">{adm.name}</h3>
+                  <h3 className="text-sm sm:text-base font-bold text-white">{adm.name || 'Unknown Admin'}</h3>
                   <p className="text-xs text-slate-400">{adm.assignedModule}</p>
                 </div>
               </div>
@@ -235,7 +237,8 @@ export const AdminsView: React.FC<AdminsViewProps> = ({ currentUser }) => {
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Bottom Floating Add New Admin Button */}

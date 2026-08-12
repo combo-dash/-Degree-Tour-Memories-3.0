@@ -68,18 +68,8 @@ const compressImageFile = (file: File): Promise<string> => {
 };
 
 export const ChatView: React.FC<ChatViewProps> = ({ currentUser }) => {
-  // Load initial messages from LocalStorage cache
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_CHAT_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.warn('Failed to load cached messages:', e);
-    }
-    return [];
-  });
+  // Load initial messages
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const [input, setInput] = useState('');
   const [selectedMedia, setSelectedMedia] = useState<{
@@ -112,23 +102,11 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser }) => {
     }
   }, [messages]);
 
-  // Subscribe to real-time chat messages from Firestore and merge with local cache
+  // Subscribe to real-time chat messages from Firestore
   useEffect(() => {
     const unsubscribe = subscribeMessages((remoteMessages) => {
       if (remoteMessages && Array.isArray(remoteMessages)) {
-        setMessages((prevLocal) => {
-          // Merge remote and local by id or timestamp
-          const map = new Map<string, ChatMessage>();
-          prevLocal.forEach((m) => {
-            map.set(m.id, m);
-          });
-          remoteMessages.forEach((m) => {
-            map.set(m.id, m);
-          });
-          const merged = Array.from(map.values());
-          merged.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-          return merged;
-        });
+        setMessages(remoteMessages);
       }
     });
     return () => unsubscribe();

@@ -29,8 +29,11 @@ import {
   likeMemoryInFirestore,
   addCommentToFirestore,
   addBatchmateToFirestore,
+  updateBatchmateInFirestore,
+  deleteBatchmateFromFirestore,
   getActiveFirebaseConfig,
-  isConnectedToFirestore
+  isConnectedToFirestore,
+  updateUserInFirestore
 } from './firebase';
 import { INITIAL_MEMORIES, INITIAL_BATCHMATES, INITIAL_TOUR_SPOTS, INITIAL_SCHEDULE } from './data/initialData';
 import { saveAdminAvatar } from './utils/adminAvatars';
@@ -168,6 +171,18 @@ export default function App() {
     setBatchmates((prev) => [...prev, { ...newBm, id: newId }]);
   };
 
+  const handleUpdateBatchmate = async (id: string, updates: Partial<Batchmate>) => {
+    setBatchmates((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, ...updates } : b))
+    );
+    await updateBatchmateInFirestore(id, updates);
+  };
+
+  const handleDeleteBatchmate = async (id: string) => {
+    setBatchmates((prev) => prev.filter((b) => b.id !== id));
+    await deleteBatchmateFromFirestore(id);
+  };
+
   // If no user is logged in, show AuthScreen as the FIRST INTERFACE
   if (!currentUser) {
     return (
@@ -240,6 +255,8 @@ export default function App() {
             <BatchmateDirectory
               batchmates={batchmates}
               onAddBatchmate={handleAddBatchmate}
+              onUpdateBatchmate={handleUpdateBatchmate}
+              onDeleteBatchmate={handleDeleteBatchmate}
               currentUser={currentUser}
             />
           )}
@@ -290,14 +307,32 @@ export default function App() {
               onOpenFirebaseModal={() => setIsFirebaseModalOpen(true)}
               currentUser={currentUser}
               onLogout={handleLogout}
-              onUpdateUserAvatar={(newAvatarUrl) => {
+              onUpdateUserAvatar={async (newAvatarUrl) => {
                 if (currentUser) {
-                  setCurrentUser({ ...currentUser, avatarUrl: newAvatarUrl });
+                  const updatedUser = { ...currentUser, avatarUrl: newAvatarUrl };
+                  setCurrentUser(updatedUser);
+                  if (currentUser.id) {
+                    await updateUserInFirestore(currentUser.id, { avatarUrl: newAvatarUrl });
+                  }
                 }
               }}
-              onUpdateProfile={(updatedData) => {
+              onUpdateProfile={async (updatedData) => {
                 if (currentUser) {
-                  setCurrentUser({ ...currentUser, ...updatedData });
+                  const updatedUser = { ...currentUser, ...updatedData };
+                  setCurrentUser(updatedUser);
+                  if (currentUser.id) {
+                    await updateUserInFirestore(currentUser.id, updatedData);
+                    // Also update in batchmates collection if this user is a batchmate
+                    // Note: Since we don't have the batchmate document ID directly here, 
+                    // and assuming rollNo is the unique link:
+                    const batchmate = batchmates.find(b => b.rollNo === currentUser.rollNo);
+                    if (batchmate) {
+                        await updateBatchmateInFirestore(batchmate.id, {
+                            name: updatedData.name !== undefined ? updatedData.name : batchmate.name,
+                            phone: updatedData.phone !== undefined ? updatedData.phone : batchmate.phone
+                        });
+                    }
+                  }
                 }
               }}
             />

@@ -32,11 +32,13 @@ export function getActiveFirebaseConfig() {
   try {
     const custom = localStorage.getItem(CUSTOM_FIREBASE_KEY);
     if (custom) {
+      console.log('Using CUSTOM Firebase config:', custom);
       return JSON.parse(custom);
     }
   } catch (e) {
     console.warn('Failed to parse custom firebase config:', e);
   }
+  console.log('Using DEFAULT Firebase config');
   return defaultConfig;
 }
 
@@ -55,7 +57,11 @@ let isConnectedToFirestore = false;
 
 try {
   const config = getActiveFirebaseConfig();
+  // FORCE-CLEAR custom config to ensure consistency across all student devices
+  localStorage.removeItem(CUSTOM_FIREBASE_KEY);
+  
   if (config && config.projectId) {
+    console.log('Firebase config loaded, initializing app with projectId:', config.projectId);
     const existingApps = getApps();
     if (existingApps.length > 0) {
       app = existingApps[0];
@@ -64,12 +70,20 @@ try {
     }
     
     // Pass custom firestore databaseId if specified in config, else default
+    const dbId = config.firestoreDatabaseId && config.firestoreDatabaseId !== '(default)' 
+      ? config.firestoreDatabaseId 
+      : '(default)';
+    console.log('Firebase Init: projectId=', config.projectId, 'dbId=', dbId);
+    
     if (config.firestoreDatabaseId && config.firestoreDatabaseId !== '(default)') {
       db = getFirestore(app, config.firestoreDatabaseId);
     } else {
       db = getFirestore(app);
     }
     isConnectedToFirestore = true;
+    console.log('Firebase Firestore DB initialized successfully:', !!db);
+  } else {
+    console.error('Firebase config missing projectId:', config);
   }
 } catch (error) {
   console.error('Firebase initialization error:', error);
@@ -86,26 +100,36 @@ const SCHEDULE_COL = 'schedule';
 const TOURS_COL = 'tours';
 const BUSES_COL = 'buses';
 const MESSAGES_COL = 'messages';
+const PAYMENT_ACCOUNTS_COL = 'paymentAccounts';
+const PAYMENT_RECORDS_COL = 'paymentRecords';
+const SETTINGS_COL = 'settings';
 
 export function subscribeMessages(onData: (messages: ChatMessage[]) => void) {
   if (!db) {
-    onData([]);
+    console.log('Firestore not ready, retrying in 1s...');
+    setTimeout(() => subscribeMessages(onData), 1000);
     return () => {};
   }
 
   try {
+    const q = query(collection(db, MESSAGES_COL), orderBy('timestamp', 'asc'));
     const unsubscribe = onSnapshot(
-      collection(db, MESSAGES_COL),
+      q,
       (snapshot) => {
+        console.log('Firestore messages snapshot received. Docs count:', snapshot.docs.length);
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === "added") {
+            console.log("New message added: ", change.doc.data());
+          }
+        });
         const list: ChatMessage[] = snapshot.docs.map((d) => ({
           id: d.id,
           ...(d.data() as Omit<ChatMessage, 'id'>)
         }));
-        list.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         onData(list);
       },
       (err) => {
-        console.warn('Firestore messages subscription error:', err);
+        console.error('Firestore messages subscription error:', err);
       }
     );
     return unsubscribe;
@@ -120,6 +144,7 @@ export async function sendMessageToFirestore(msg: Omit<ChatMessage, 'id'>): Prom
     console.warn('No Firestore db instance for sending message.');
     return 'temp-' + Date.now();
   }
+  console.log('Attempting to send message to Firestore collection:', MESSAGES_COL);
   try {
     let safeMsg = { ...msg };
     // Firestore document limit is 1MB (~1,048,576 bytes).
@@ -132,6 +157,7 @@ export async function sendMessageToFirestore(msg: Omit<ChatMessage, 'id'>): Prom
       };
     }
     const docRef = await addDoc(collection(db, MESSAGES_COL), safeMsg);
+    console.log('Message successfully saved to Firestore with ID:', docRef.id);
     return docRef.id;
   } catch (e) {
     console.error('Error sending message to Firestore:', e);
@@ -466,6 +492,28 @@ export async function addBatchmateToFirestore(batchmate: Omit<Batchmate, 'id'>) 
   return docRef.id;
 }
 
+export async function updateBatchmateInFirestore(id: string, updates: Partial<Batchmate>) {
+  if (!db) return;
+  try {
+    const docRef = doc(db, BATCHMATES_COL, id);
+    await updateDoc(docRef, updates);
+  } catch (e) {
+    console.error('Error updating batchmate:', e);
+  }
+}
+
+export async function deleteBatchmateFromFirestore(id: string) {
+  if (!db) return;
+  console.log('Attempting to delete batchmate:', id);
+  try {
+    const docRef = doc(db, BATCHMATES_COL, id);
+    await deleteDoc(docRef);
+    console.log('Batchmate deleted successfully');
+  } catch (e) {
+    console.error('Error deleting batchmate:', e);
+  }
+}
+
 export async function addTourToFirestore(tour: Omit<TourPackage, 'id'>): Promise<string> {
   if (!db) return 'temp-' + Date.now();
   const docRef = await addDoc(collection(db, TOURS_COL), tour);
@@ -624,5 +672,182 @@ export async function deleteUserFromFirestore(id: string) {
     await deleteDoc(doc(db, USERS_COL, id));
   } catch (e) {
     console.error('Error deleting user:', e);
+  }
+}
+
+export async function disableUserInFirestore(id: string) {
+  if (!db) return;
+  try {
+    await updateDoc(doc(db, USERS_COL, id), { disabled: true });
+    console.log('User disabled successfully:', id);
+  } catch (e) {
+    console.error('Error disabling user:', e);
+  }
+}
+
+// ----------------------------------------------------------------------
+// Payment & Settings Helpers
+// ----------------------------------------------------------------------
+
+export function subscribePackageFee(onData: (fee: number) => void) {
+  if (!db) {
+    onData(3500);
+    return () => {};
+  }
+  try {
+    const docRef = doc(db, SETTINGS_COL, 'paymentSettings');
+    return onSnapshot(docRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.packageFee !== undefined) {
+          onData(data.packageFee);
+        } else {
+          onData(3500);
+        }
+      } else {
+        onData(3500);
+      }
+    }, () => onData(3500));
+  } catch (err) {
+    onData(3500);
+    return () => {};
+  }
+}
+
+export async function updatePackageFeeInFirestore(fee: number) {
+  if (!db) return;
+  try {
+    const docRef = doc(db, SETTINGS_COL, 'paymentSettings');
+    await setDoc(docRef, { packageFee: fee }, { merge: true });
+  } catch (err) {
+    console.error('Error updating fee:', err);
+  }
+}
+
+export function subscribePaymentAccounts(onData: (accounts: any[]) => void, defaultAccounts: any[]) {
+  if (!db) {
+    onData(defaultAccounts);
+    return () => {};
+  }
+  try {
+    const q = query(collection(db, PAYMENT_ACCOUNTS_COL));
+    return onSnapshot(q, (snap) => {
+      if (snap.empty) {
+        onData(defaultAccounts);
+      } else {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        onData(list);
+      }
+    }, () => onData(defaultAccounts));
+  } catch (err) {
+    onData(defaultAccounts);
+    return () => {};
+  }
+}
+
+export async function updatePaymentAccountsInFirestore(accounts: any[]) {
+  if (!db) return;
+  try {
+    // We can clear and set, or just use a single document for all accounts if easier.
+    // Let's use a single document 'accountsList' inside SETTINGS_COL for simplicity to avoid managing multiple docs.
+    const docRef = doc(db, SETTINGS_COL, 'paymentAccountsList');
+    await setDoc(docRef, { accounts });
+  } catch (err) {
+    console.error('Error updating accounts:', err);
+  }
+}
+
+export function subscribePaymentAccountsList(onData: (accounts: any[]) => void, defaultAccounts: any[]) {
+  if (!db) {
+    onData(defaultAccounts);
+    return () => {};
+  }
+  try {
+    const docRef = doc(db, SETTINGS_COL, 'paymentAccountsList');
+    return onSnapshot(docRef, (snap) => {
+      if (snap.exists() && snap.data().accounts) {
+        onData(snap.data().accounts);
+      } else {
+        onData(defaultAccounts);
+      }
+    }, () => onData(defaultAccounts));
+  } catch (err) {
+    onData(defaultAccounts);
+    return () => {};
+  }
+}
+
+export function subscribePaymentRecords(onData: (records: any[]) => void) {
+  if (!db) {
+    onData([]);
+    return () => {};
+  }
+  try {
+    const q = query(collection(db, PAYMENT_RECORDS_COL));
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // sort by date desc
+      list.sort((a: any, b: any) => {
+        if (a.date === b.date) {
+           return (b.timestamp || 0) - (a.timestamp || 0);
+        }
+        return b.date.localeCompare(a.date);
+      });
+      onData(list);
+    }, () => onData([]));
+  } catch (err) {
+    onData([]);
+    return () => {};
+  }
+}
+
+export async function addPaymentRecordToFirestore(record: Omit<any, 'id'>): Promise<string> {
+  if (!db) return 'temp-' + Date.now();
+  const docRef = await addDoc(collection(db, PAYMENT_RECORDS_COL), { ...record, timestamp: Date.now() });
+  return docRef.id;
+}
+
+export async function updatePaymentRecordStatusInFirestore(id: string, status: string) {
+  if (!db) return;
+  try {
+    const docRef = doc(db, PAYMENT_RECORDS_COL, id);
+    await updateDoc(docRef, { status });
+  } catch (err) {
+    console.error('Error updating record status:', err);
+  }
+}
+
+
+// ----------------------------------------------------------------------
+// Notices Helpers
+// ----------------------------------------------------------------------
+const NOTICES_COL = 'notices';
+
+export function subscribeNotices(onData: (notices: any[]) => void) {
+  if (!db) {
+    onData([]);
+    return () => {};
+  }
+  try {
+    const q = query(collection(db, NOTICES_COL));
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      list.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
+      onData(list);
+    }, () => onData([]));
+  } catch (err) {
+    onData([]);
+    return () => {};
+  }
+}
+
+export async function addNoticeToFirestore(notice: Omit<any, 'id'>): Promise<string> {
+  if (!db) return 'temp-' + Date.now();
+  try {
+    const docRef = await addDoc(collection(db, NOTICES_COL), { ...notice, timestamp: Date.now() });
+    return docRef.id;
+  } catch (err) {
+    console.error('Error adding notice:', err);
+    return 'temp-' + Date.now();
   }
 }

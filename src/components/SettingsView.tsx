@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RefreshCw, Lock, CloudDownload, LogOut, CheckCircle2, Camera, Upload, User as UserIcon } from 'lucide-react';
 import { UserSession } from './AuthScreen';
 import { saveAdminAvatar } from '../utils/adminAvatars';
@@ -36,8 +36,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const [profileName, setProfileName] = useState(currentUser?.name || '');
   const [profilePhone, setProfilePhone] = useState(currentUser?.phone || '');
+  const [profileGender, setProfileGender] = useState<'male' | 'female'>(currentUser?.gender || 'male');
   const [profilePassword, setProfilePassword] = useState('');
   const [profileSuccess, setProfileSuccess] = useState(false);
+
+  useEffect(() => {
+    if (currentUser) {
+      setAvatarUrlInput(currentUser.avatarUrl || '');
+      setProfileName(currentUser.name || '');
+      setProfilePhone(currentUser.phone || '');
+      setProfileGender(currentUser.gender || 'male');
+    }
+  }, [currentUser]);
 
   const isAdminOrSuper = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
 
@@ -51,18 +61,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const url = URL.createObjectURL(file);
-      setAvatarUrlInput(url);
-      if (currentUser && isAdminOrSuper) {
-        saveAdminAvatar(currentUser.role, url);
-        if (currentUser.email) saveAdminAvatar(currentUser.email, url);
-        saveAdminAvatar(currentUser.name, url);
+      if (file.size > 500000) {
+        alert('File is too large! Please choose an image smaller than 500KB.');
+        return;
       }
-      if (onUpdateUserAvatar) {
-        onUpdateUserAvatar(url);
-        setAvatarSuccess(true);
-        setTimeout(() => setAvatarSuccess(false), 3000);
-      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = reader.result as string;
+        setAvatarUrlInput(url);
+        if (currentUser && isAdminOrSuper) {
+          saveAdminAvatar(currentUser.role, url);
+          if (currentUser.email) saveAdminAvatar(currentUser.email, url);
+          saveAdminAvatar(currentUser.name, url);
+        }
+        if (onUpdateUserAvatar) {
+          onUpdateUserAvatar(url);
+          setAvatarSuccess(true);
+          setTimeout(() => setAvatarSuccess(false), 3000);
+        }
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -90,7 +108,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       onUpdateProfile({
         name: profileName.trim(),
         phone: profilePhone.trim(),
-        avatarUrl: avatarUrlInput.trim() || currentUser?.avatarUrl
+        avatarUrl: avatarUrlInput.trim() || currentUser?.avatarUrl,
+        gender: profileGender
       });
     }
     setProfileSuccess(true);
@@ -147,11 +166,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </div>
 
-      {/* ADMIN / SUPER ADMIN PROFILE SETTING & EDIT */}
-      {isAdminOrSuper && (
+      {/* PROFILE SETTING & EDIT */}
+      {currentUser && (
         <div className="space-y-2">
           <h2 className="text-xs font-black text-amber-400 uppercase tracking-wider">
-            SUPER ADMIN & ADMIN PROFILE SETTINGS
+            {currentUser.role === 'student' ? 'STUDENT PROFILE SETTINGS' : 'SUPER ADMIN & ADMIN PROFILE SETTINGS'}
           </h2>
 
           <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 space-y-4 shadow-lg">
@@ -185,11 +204,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
             )}
 
-            {/* Profile Info Update Form */}
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">
+                প্রোফাইল ছবি (Upload Image File or URL)
+              </label>
+              <div className="space-y-2">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAvatarFileChange}
+                  className="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer"
+                />
+                <input
+                  type="url"
+                  value={avatarUrlInput}
+                  onChange={(e) => setAvatarUrlInput(e.target.value)}
+                  placeholder="অথবা ছবির সরাসরি URL পেস্ট করুন"
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
             <form onSubmit={handleProfileSubmit} className="space-y-3 pt-2 border-t border-slate-800">
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">
-                  এডমিনের নাম (Full Name)
+                  {currentUser.role === 'student' ? 'আপনার নাম (Full Name)' : 'এডমিনের নাম (Full Name)'}
                 </label>
                 <input
                   type="text"
@@ -215,23 +253,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">
-                  প্রোফাইল ছবি (Upload Image File or URL)
+                  জেন্ডার (Gender)
                 </label>
-                <div className="space-y-2">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleAvatarFileChange}
-                    className="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer"
-                  />
-                  <input
-                    type="url"
-                    value={avatarUrlInput}
-                    onChange={(e) => setAvatarUrlInput(e.target.value)}
-                    placeholder="অথবাছবির সরাসরি URL পেস্ট করুন"
-                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
+                <select
+                  value={profileGender}
+                  onChange={(e) => setProfileGender(e.target.value as 'male' | 'female')}
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="male">Male (পুরুষ)</option>
+                  <option value="female">Female (মহিলা)</option>
+                </select>
               </div>
 
               <div className="pt-2 flex justify-end">

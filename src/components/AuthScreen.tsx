@@ -40,6 +40,7 @@ export interface UserSession {
   emergencyContact?: string;
   avatarUrl?: string;
   password?: string;
+  gender?: 'male' | 'female';
 }
 
 import tourBusLogo from '../assets/images/tour_bus_logo_1786427462634.jpg';
@@ -84,6 +85,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [studentStatus, setStudentStatus] = useState('Regular');
   const [studentId, setStudentId] = useState('');
   const [bloodGroup, setBloodGroup] = useState('O+');
+  const [gender, setGender] = useState<'male' | 'female'>('male');
   const [address, setAddress] = useState('');
   const [emergencyContact, setEmergencyContact] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -99,8 +101,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const url = URL.createObjectURL(file);
-      setAvatarPreview(url);
+      // Check file size (limit to 500KB to avoid Firestore document limits)
+      if (file.size > 500000) {
+        alert('File is too large! Please choose an image smaller than 500KB.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        setAvatarPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -169,6 +179,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       );
 
       if (foundUser) {
+        if (foundUser.disabled) {
+          setNotification(
+            language === 'EN'
+              ? 'Account is disabled! Please contact support.'
+              : 'আপনার অ্যাকাউন্টটি বন্ধ করে দেওয়া হয়েছে! অনুগ্রহ করে এডমিনের সাথে যোগাযোগ করুন।'
+          );
+          setIsLoading(false);
+          return;
+        }
         onSignInSuccess({
           id: foundUser.id,
           name: foundUser.name,
@@ -179,7 +198,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           degreeType: foundUser.degreeType,
           session: foundUser.session,
           status: foundUser.status,
-          bloodGroup: foundUser.bloodGroup
+          bloodGroup: foundUser.bloodGroup,
+          avatarUrl: foundUser.avatarUrl,
+          gender: foundUser.gender
         });
       } else {
         setNotification(
@@ -226,6 +247,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         session: sessionVal,
         status: studentStatus,
         bloodGroup,
+        gender,
         address,
         emergencyContact,
         avatarUrl: avatarPreview || undefined,
@@ -736,25 +758,41 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 </div>
               </div>
 
-              {/* Blood Group * */}
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-300 block">
-                  Blood Group *
-                </label>
-                <select
-                  value={bloodGroup}
-                  onChange={(e) => setBloodGroup(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="O+">O+</option>
-                  <option value="A+">A+</option>
-                  <option value="B+">B+</option>
-                  <option value="AB+">AB+</option>
-                  <option value="O-">O-</option>
-                  <option value="A-">A-</option>
-                  <option value="B-">B-</option>
-                  <option value="AB-">AB-</option>
-                </select>
+              {/* Blood Group & Gender (Grid) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300 block">
+                    Blood Group *
+                  </label>
+                  <select
+                    value={bloodGroup}
+                    onChange={(e) => setBloodGroup(e.target.value)}
+                    className="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="O+">O+</option>
+                    <option value="A+">A+</option>
+                    <option value="B+">B+</option>
+                    <option value="AB+">AB+</option>
+                    <option value="O-">O-</option>
+                    <option value="A-">A-</option>
+                    <option value="B-">B-</option>
+                    <option value="AB-">AB-</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300 block">
+                    Gender (জেন্ডার) *
+                  </label>
+                  <select
+                    value={gender}
+                    onChange={(e) => setGender(e.target.value as 'male' | 'female')}
+                    className="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="male">Male (পুরুষ)</option>
+                    <option value="female">Female (মহিলা)</option>
+                  </select>
+                </div>
               </div>
 
               {/* Address * */}

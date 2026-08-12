@@ -12,6 +12,11 @@ export interface AppUser {
   session?: string;
   status?: string;
   bloodGroup?: string;
+  avatarUrl?: string;
+  address?: string;
+  emergencyContact?: string;
+  gender?: 'male' | 'female';
+  disabled?: boolean;
 }
 
 export interface Comment {

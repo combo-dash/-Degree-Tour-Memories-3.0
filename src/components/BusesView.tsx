@@ -221,11 +221,14 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
   const handleSeatClick = (seat: BusSeat) => {
     setSelectedSeat(seat);
     setBookingError('');
-    const initialName = seat.status === 'booked' ? (seat.bookedBy || '') : '';
-    const initialPhone = seat.status === 'booked' ? (seat.bookedPhone || '') : '';
+    const initialName = seat.status === 'booked' ? (seat.bookedBy || '') : (currentUser?.name || '');
+    const initialPhone = seat.status === 'booked' ? (seat.bookedPhone || '') : (currentUser?.phone || '');
     setBookingName(initialName);
     setBookingPhone(initialPhone);
-    setBookingGender(seat.gender || (seat.status === 'female_only' ? 'female' : 'male'));
+    const initialGender = seat.status === 'booked' 
+      ? (seat.gender || 'male') 
+      : (currentUser?.gender || seat.gender || (seat.status === 'female_only' ? 'female' : 'male'));
+    setBookingGender(initialGender);
 
     // Auto find student photo from seat or batchmates
     let foundPhoto = seat.bookedPhotoUrl || '';
@@ -324,6 +327,34 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
     ) {
       setBookingError('এই সিটটি অন্য শিক্ষার্থীর নামে বুক করা আছে। আপনি এটি পরিবর্তন করতে পারবেন না।');
       return;
+    }
+
+    // Adjacent seat gender restriction algorithm
+    const seatId = selectedSeat.id;
+    const col = parseInt(seatId.substring(1), 10);
+    let adjCol: number | null = null;
+    if (col === 1) adjCol = 2;
+    else if (col === 2) adjCol = 1;
+    else if (col === 3) adjCol = 4;
+    else if (col === 4) adjCol = 3;
+
+    if (adjCol !== null && activeBus) {
+      const adjSeatId = seatId.charAt(0) + adjCol;
+      const normalizedSeatsMap = getNormalizedSeatsMap(activeBus);
+      const adjSeat = normalizedSeatsMap[adjSeatId];
+      if (adjSeat && adjSeat.status === 'booked') {
+        const adjGender = adjSeat.gender || 'male';
+        if (adjGender !== bookingGender) {
+          if (adjGender === 'female' && bookingGender === 'male') {
+            setBookingError('নিরাপত্তা ও সুবিধার জন্য, ছাত্রীদের পাশের সিট শুধুমাত্র ছাত্রীরা বুক করতে পারবেন।');
+            return;
+          }
+          if (adjGender === 'male' && bookingGender === 'female') {
+            setBookingError('নিরাপত্তা ও সুবিধার জন্য, ছাত্রদের পাশের সিট শুধুমাত্র ছাত্ররা বুক করতে পারবেন।');
+            return;
+          }
+        }
+      }
     }
 
     setBookingError('');
@@ -592,17 +623,7 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
             {selectedSeat.status === 'booked' && (
               <div className="p-4 rounded-2xl bg-indigo-950/40 border border-indigo-800/60 text-left text-xs space-y-3">
                 <div className="flex items-center gap-3">
-                  {selectedSeat.bookedPhotoUrl ? (
-                    <img
-                      src={selectedSeat.bookedPhotoUrl}
-                      alt={selectedSeat.bookedBy}
-                      className="w-14 h-14 rounded-full object-cover border-2 border-indigo-400 shadow-md shrink-0"
-                    />
-                  ) : (
-                    <div className="w-14 h-14 rounded-full bg-indigo-600 text-white font-black text-lg flex items-center justify-center border-2 border-indigo-400 shadow-md shrink-0">
-                      {(selectedSeat.bookedBy || 'S').charAt(0).toUpperCase()}
-                    </div>
-                  )}
+                  {/* Removed profile photo display */}
                   <div>
                     <h4 className="text-sm font-extrabold text-white">
                       {selectedSeat.bookedBy || 'Student'}
@@ -664,38 +685,22 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
                 </div>
 
                 {/* Photo Selection / Upload */}
-                {(!isAdminOrSuper || bookingPhotoUrl) && (
-                  <div>
-                    <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                      প্রোফাইল ফটো (Profile Photo)
-                    </label>
-                    <div className="flex items-center gap-3">
-                      {bookingPhotoUrl ? (
-                        <img
-                          src={bookingPhotoUrl}
-                          alt="Preview"
-                          className="w-10 h-10 rounded-full object-cover border border-indigo-400 shrink-0"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 shrink-0">
-                          <User className="w-5 h-5" />
-                        </div>
-                      )}
-                      
-                      {!isAdminOrSuper && (
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          disabled={isCompressingPhoto}
-                          className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-bold border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer"
-                        >
-                          <Camera className="w-3.5 h-3.5 text-indigo-400" />
-                          <span>{bookingPhotoUrl ? 'ছবি পরিবর্তন' : 'ফটো আপলোড'}</span>
-                        </button>
-                      )}
-                    </div>
+                <div className="mt-4">
+                  <label className="text-[11px] font-semibold text-slate-300 block mb-1">
+                    প্রোফাইল ফটো (Profile Photo)
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isCompressingPhoto}
+                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-bold border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Camera className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>{bookingPhotoUrl ? 'ছবি পরিবর্তন' : 'ফটো আপলোড'}</span>
+                    </button>
                   </div>
-                )}
+                </div>
 
                 {/* Gender */}
                 <div>
@@ -705,27 +710,42 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
                   <div className="flex gap-2">
                     <button
                       type="button"
+                      disabled={!!currentUser?.gender && currentUser.role !== 'admin' && currentUser.role !== 'superadmin'}
                       onClick={() => setBookingGender('male')}
                       className={`flex-1 py-1.5 rounded-xl text-xs font-bold border transition-all ${
                         bookingGender === 'male'
                           ? 'bg-sky-600 border-sky-500 text-white'
                           : 'bg-slate-950 border-slate-800 text-slate-400'
+                      } ${
+                        !!currentUser?.gender && currentUser.role !== 'admin' && currentUser.role !== 'superadmin'
+                          ? 'opacity-70 cursor-not-allowed'
+                          : ''
                       }`}
                     >
                       Male (ছাত্র)
                     </button>
                     <button
                       type="button"
+                      disabled={!!currentUser?.gender && currentUser.role !== 'admin' && currentUser.role !== 'superadmin'}
                       onClick={() => setBookingGender('female')}
                       className={`flex-1 py-1.5 rounded-xl text-xs font-bold border transition-all ${
                         bookingGender === 'female'
                           ? 'bg-fuchsia-600 border-fuchsia-500 text-white'
                           : 'bg-slate-950 border-slate-800 text-slate-400'
+                      } ${
+                        !!currentUser?.gender && currentUser.role !== 'admin' && currentUser.role !== 'superadmin'
+                          ? 'opacity-70 cursor-not-allowed'
+                          : ''
                       }`}
                     >
                       Female ( ছাত্রী)
                     </button>
                   </div>
+                  {currentUser?.gender && currentUser.role !== 'admin' && currentUser.role !== 'superadmin' && (
+                    <span className="text-[10px] text-indigo-400 mt-1 block">
+                      * আপনার প্রোফাইলের জেন্ডার অনুযায়ী এটি নির্ধারিত (Locked to profile gender)
+                    </span>
+                  )}
                 </div>
               </div>
             )}

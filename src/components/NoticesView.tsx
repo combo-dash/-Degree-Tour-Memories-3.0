@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Megaphone, Bell, Plus, Search, AlertCircle, Pin, Calendar, ShieldCheck } from 'lucide-react';
 import { UserSession } from './AuthScreen';
+import { subscribeNotices, addNoticeToFirestore } from '../firebase';
 
 interface Notice {
   id: string;
@@ -11,6 +12,7 @@ interface Notice {
   date: string;
   isPinned: boolean;
   priority: 'High' | 'Normal';
+  timestamp?: number;
 }
 
 const INITIAL_NOTICES: Notice[] = [];
@@ -28,14 +30,18 @@ export const NoticesView: React.FC<NoticesViewProps> = ({ currentUser }) => {
   const [newContent, setNewContent] = useState('');
   const [priority, setPriority] = useState<'High' | 'Normal'>('Normal');
 
+  useEffect(() => {
+    const unsubscribe = subscribeNotices(setNotices);
+    return () => unsubscribe();
+  }, []);
+
   const isAdminOrSuper = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
 
-  const handlePostNotice = (e: React.FormEvent) => {
+  const handlePostNotice = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle || !newContent) return;
 
-    const noticeObj: Notice = {
-      id: `n-${Date.now()}`,
+    const noticeObj: Omit<Notice, 'id'> = {
       title: newTitle,
       content: newContent,
       author: currentUser?.name || 'অফিসিয়াল এডমিন',
@@ -45,7 +51,7 @@ export const NoticesView: React.FC<NoticesViewProps> = ({ currentUser }) => {
       priority
     };
 
-    setNotices([noticeObj, ...notices]);
+    await addNoticeToFirestore(noticeObj);
     setNewTitle('');
     setNewContent('');
     setIsAddOpen(false);

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   CreditCard,
   Edit3,
@@ -19,6 +19,15 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { UserSession } from './AuthScreen';
+import {
+  subscribePackageFee,
+  updatePackageFeeInFirestore,
+  subscribePaymentAccountsList,
+  updatePaymentAccountsInFirestore,
+  subscribePaymentRecords,
+  addPaymentRecordToFirestore,
+  updatePaymentRecordStatusInFirestore
+} from '../firebase';
 
 export interface PaymentAccount {
   id: string;
@@ -111,6 +120,18 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
   const [selectedAccountId, setSelectedAccountId] = useState<string>('bkash-1');
   const [records, setRecords] = useState<PaymentRecord[]>(INITIAL_RECORDS);
 
+  useEffect(() => {
+    const unsubFee = subscribePackageFee(setPackageFee);
+    const unsubAccounts = subscribePaymentAccountsList(setAccounts, DEFAULT_ACCOUNTS);
+    const unsubRecords = subscribePaymentRecords(setRecords);
+
+    return () => {
+      unsubFee();
+      unsubAccounts();
+      unsubRecords();
+    };
+  }, []);
+
   // Copy state feedback
   const [copiedNumber, setCopiedNumber] = useState<string | null>(null);
 
@@ -152,11 +173,11 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
     setIsEditFeeOpen(true);
   };
 
-  const handleSaveFee = (e: React.FormEvent) => {
+  const handleSaveFee = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = Number(tempFee);
     if (val > 0) {
-      setPackageFee(val);
+      await updatePackageFeeInFirestore(val);
       setIsEditFeeOpen(false);
     }
   };
@@ -188,13 +209,14 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
     setEditingAccountsList([...editingAccountsList, newAcc]);
   };
 
-  const handleSaveAccounts = (e: React.FormEvent) => {
+  const handleSaveAccounts = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editAccountsProvider) return;
 
     const otherAccounts = accounts.filter((a) => a.provider !== editAccountsProvider);
     const updated = [...otherAccounts, ...editingAccountsList];
-    setAccounts(updated);
+    
+    await updatePaymentAccountsInFirestore(updated);
 
     // If selected account was removed, update selected
     if (!updated.some((a) => a.id === selectedAccountId)) {
@@ -205,12 +227,11 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
   };
 
   // Student submit payment
-  const handleSubmitPayment = (e: React.FormEvent) => {
+  const handleSubmitPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!subStudentName || !subRollNo || !subTrxId) return;
 
-    const newRecord: PaymentRecord = {
-      id: `rec-${Date.now()}`,
+    const newRecord: Omit<PaymentRecord, 'id'> = {
       studentName: subStudentName,
       rollNo: subRollNo,
       degreeType: 'Batch 88',
@@ -224,7 +245,7 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
       note: subNote
     };
 
-    setRecords([newRecord, ...records]);
+    await addPaymentRecordToFirestore(newRecord);
     setSubSuccess(true);
     setTimeout(() => {
       setSubSuccess(false);
@@ -235,8 +256,8 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
   };
 
   // Admin status toggle
-  const handleUpdateRecordStatus = (id: string, newStatus: 'Verified' | 'Pending' | 'Rejected') => {
-    setRecords(records.map((r) => (r.id === id ? { ...r, status: newStatus } : r)));
+  const handleUpdateRecordStatus = async (id: string, newStatus: 'Verified' | 'Pending' | 'Rejected') => {
+    await updatePaymentRecordStatusInFirestore(id, newStatus);
   };
 
   const filteredRecords = records.filter((r) => {
@@ -695,6 +716,25 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
                                 Reject
                               </button>
                             )}
+                            <button
+                              onClick={() => {
+                                // Add edit logic here
+                                console.log('Edit payment:', rec.id);
+                              }}
+                              className="p-1 text-blue-400 hover:bg-blue-500/20 rounded cursor-pointer"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (window.confirm('Are you sure you want to delete this payment record?')) {
+                                  await deletePaymentFromFirestore(rec.id);
+                                }
+                              }}
+                              className="p-1 text-rose-400 hover:bg-rose-500/20 rounded cursor-pointer"
+                            >
+                              <Trash2 size={14} />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -854,6 +894,24 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
                       <option value="Send Money">Send Money</option>
                       <option value="Agent">Agent</option>
                     </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">
+                      Payment Instructions (পেমেন্ট নির্দেশনাবলী)
+                    </label>
+                    <textarea
+                      required
+                      rows={3}
+                      value={acc.instructions}
+                      onChange={(e) => {
+                        const copy = [...editingAccountsList];
+                        copy[index].instructions = e.target.value;
+                        setEditingAccountsList(copy);
+                      }}
+                      className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans"
+                      placeholder="পেমেন্ট করার ধাপগুলো এখানে লিখুন..."
+                    />
                   </div>
                 </div>
               ))}
