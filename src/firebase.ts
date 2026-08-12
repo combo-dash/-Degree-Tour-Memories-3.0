@@ -935,3 +935,23 @@ export async function addNoticeToFirestore(notice: Omit<any, 'id'>): Promise<str
     return 'temp-' + Date.now();
   }
 }
+
+export async function updateNoticeInFirestore(id: string, updates: Partial<any>) {
+  if (!db) return;
+  try {
+    const docRef = doc(db, NOTICES_COL, id);
+    await updateDoc(docRef, updates);
+  } catch (err) {
+    console.error('Error updating notice:', err);
+  }
+}
+
+export async function deleteNoticeFromFirestore(id: string) {
+  if (!db) return;
+  try {
+    const docRef = doc(db, NOTICES_COL, id);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.error('Error deleting notice:', err);
+  }
+}

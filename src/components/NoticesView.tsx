@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Megaphone, Bell, Plus, Search, AlertCircle, Pin, Calendar, ShieldCheck } from 'lucide-react';
+import { Megaphone, Bell, Plus, Search, AlertCircle, Pin, Calendar, ShieldCheck, Edit2, Trash2, X } from 'lucide-react';
 import { UserSession } from './AuthScreen';
-import { subscribeNotices, addNoticeToFirestore } from '../firebase';
+import { subscribeNotices, addNoticeToFirestore, deleteNoticeFromFirestore, updateNoticeInFirestore } from '../firebase';
 
 interface Notice {
   id: string;
@@ -26,6 +26,7 @@ export const NoticesView: React.FC<NoticesViewProps> = ({ currentUser }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showImportantOnly, setShowImportantOnly] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editingNotice, setEditingNotice] = useState<Notice | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
   const [priority, setPriority] = useState<'High' | 'Normal'>('Normal');
@@ -36,25 +37,51 @@ export const NoticesView: React.FC<NoticesViewProps> = ({ currentUser }) => {
   }, []);
 
   const isAdminOrSuper = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
+  const isSuperAdmin = currentUser?.role === 'superadmin';
 
   const handlePostNotice = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle || !newContent) return;
 
-    const noticeObj: Omit<Notice, 'id'> = {
-      title: newTitle,
-      content: newContent,
-      author: currentUser?.name || 'অফিসিয়াল এডমিন',
-      authorRole: currentUser?.role === 'superadmin' ? 'Super Admin' : 'Admin',
-      date: new Date().toLocaleDateString('bn-BD', { day: 'numeric', month: 'long', year: 'numeric' }),
-      isPinned: priority === 'High',
-      priority
-    };
+    if (editingNotice) {
+      await updateNoticeInFirestore(editingNotice.id, {
+        title: newTitle,
+        content: newContent,
+        isPinned: priority === 'High',
+        priority
+      });
+      setEditingNotice(null);
+    } else {
+      const noticeObj: Omit<Notice, 'id'> = {
+        title: newTitle,
+        content: newContent,
+        author: currentUser?.name || 'অফিসিয়াল এডমিন',
+        authorRole: currentUser?.role === 'superadmin' ? 'Super Admin' : 'Admin',
+        date: new Date().toLocaleDateString('bn-BD', { day: 'numeric', month: 'long', year: 'numeric' }),
+        isPinned: priority === 'High',
+        priority
+      };
 
-    await addNoticeToFirestore(noticeObj);
+      await addNoticeToFirestore(noticeObj);
+    }
+    
     setNewTitle('');
     setNewContent('');
     setIsAddOpen(false);
+  };
+
+  const handleDeleteNotice = async (id: string) => {
+    if (window.confirm('Are you sure you want to delete this notice?')) {
+      await deleteNoticeFromFirestore(id);
+    }
+  };
+
+  const handleEditClick = (n: Notice) => {
+    setEditingNotice(n);
+    setNewTitle(n.title);
+    setNewContent(n.content);
+    setPriority(n.priority);
+    setIsAddOpen(true);
   };
 
   const filteredNotices = notices.filter((n) => {
@@ -132,9 +159,29 @@ export const NoticesView: React.FC<NoticesViewProps> = ({ currentUser }) => {
                   </span>
                 </div>
 
-                <span className="text-xs font-semibold text-blue-400 flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5" /> {n.author}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-semibold text-blue-400 flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5" /> {n.author}
+                  </span>
+                  {isSuperAdmin && (
+                    <div className="flex items-center gap-1">
+                      <button 
+                        onClick={() => handleEditClick(n)}
+                        className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-blue-400 hover:bg-slate-700 transition-colors cursor-pointer"
+                        title="Edit Notice"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteNotice(n.id)}
+                        className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-rose-400 hover:bg-slate-700 transition-colors cursor-pointer"
+                        title="Delete Notice"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <h3 className="text-lg font-bold text-white mb-2">{n.title}</h3>
@@ -157,11 +204,18 @@ export const NoticesView: React.FC<NoticesViewProps> = ({ currentUser }) => {
         </div>
       )}
 
-      {/* Add Notice Modal */}
+      {/* Add / Edit Notice Modal */}
       {isAddOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
-            <h3 className="text-lg font-bold text-white">নতুন নোটিশ প্রকাশ করুন</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-white">
+                {editingNotice ? 'নোটিশটি এডিট করুন' : 'নতুন নোটিশ প্রকাশ করুন'}
+              </h3>
+              <button onClick={() => { setIsAddOpen(false); setEditingNotice(null); }} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
             <form onSubmit={handlePostNotice} className="space-y-3">
               <div>
@@ -203,7 +257,7 @@ export const NoticesView: React.FC<NoticesViewProps> = ({ currentUser }) => {
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setIsAddOpen(false)}
+                  onClick={() => { setIsAddOpen(false); setEditingNotice(null); }}
                   className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white"
                 >
                   বাতিল
@@ -212,7 +266,7 @@ export const NoticesView: React.FC<NoticesViewProps> = ({ currentUser }) => {
                   type="submit"
                   className="px-5 py-2.5 rounded-xl text-xs font-extrabold text-white bg-blue-600 hover:bg-blue-500 cursor-pointer shadow-md"
                 >
-                  পাবলিশ করুন
+                  {editingNotice ? 'আপডেট করুন' : 'পাবলিশ করুন'}
                 </button>
               </div>
             </form>
