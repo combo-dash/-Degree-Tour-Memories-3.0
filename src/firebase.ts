@@ -12,7 +12,8 @@ import {
   orderBy,
   Firestore,
   getDocs,
-  setDoc
+  setDoc,
+  writeBatch
 } from 'firebase/firestore';
 import defaultConfig from '../firebase-applet-config.json';
 import { AppUser, Memory, Batchmate, TourSpot, ScheduleItem, TourPackage, BusPackage, Comment, ChatMessage } from './types';
@@ -588,11 +589,41 @@ export async function clearAllFirestoreData(): Promise<boolean> {
   if (!db) return false;
 
   try {
-    const collectionsToClear = [MEMORIES_COL, SPOTS_COL, SCHEDULE_COL, TOURS_COL, BATCHMATES_COL];
+    const collectionsToClear = [
+      MEMORIES_COL,
+      SPOTS_COL,
+      SCHEDULE_COL,
+      TOURS_COL,
+      BATCHMATES_COL,
+      PAYMENT_RECORDS_COL,
+      MESSAGES_COL,
+      BUSES_COL,
+      PAYMENT_ACCOUNTS_COL,
+      SETTINGS_COL,
+      NOTICES_COL,
+      USERS_COL
+    ];
+    
     for (const colName of collectionsToClear) {
       const snap = await getDocs(collection(db, colName));
+      if (snap.empty) continue;
+
+      // Use batches (Firestore limit is 500 per batch)
+      let batch = writeBatch(db);
+      let count = 0;
+
       for (const d of snap.docs) {
-        await deleteDoc(doc(db, colName, d.id));
+        batch.delete(d.ref);
+        count++;
+        if (count >= 500) {
+          await batch.commit();
+          batch = writeBatch(db);
+          count = 0;
+        }
+      }
+      
+      if (count > 0) {
+        await batch.commit();
       }
     }
     return true;
@@ -814,6 +845,59 @@ export async function updatePaymentRecordStatusInFirestore(id: string, status: s
     await updateDoc(docRef, { status });
   } catch (err) {
     console.error('Error updating record status:', err);
+  }
+}
+
+export async function clearAllPaymentsFromFirestore(): Promise<boolean> {
+  if (!db) {
+    console.error('Firestore not initialized during clear operation');
+    return false;
+  }
+  try {
+    const snap = await getDocs(collection(db, PAYMENT_RECORDS_COL));
+    if (snap.empty) {
+      console.log('Payment records collection already empty');
+      return true;
+    }
+
+    console.log(`Clearing all payment records (${snap.size} documents)...`);
+    let batch = writeBatch(db);
+    let count = 0;
+
+    for (const d of snap.docs) {
+      batch.delete(d.ref);
+      count++;
+      if (count >= 500) {
+        await batch.commit();
+        batch = writeBatch(db);
+        count = 0;
+      }
+    }
+    
+    if (count > 0) {
+      await batch.commit();
+    }
+    console.log('Successfully cleared all payment records from Firestore.');
+    return true;
+  } catch (e) {
+    console.error('CRITICAL: Error clearing paymentRecords collection:', e);
+    return false;
+  }
+}
+
+export async function deletePaymentFromFirestore(id: string) {
+  if (!db) {
+    console.error('Firestore not initialized');
+    return;
+  }
+  try {
+    const docRef = doc(db, PAYMENT_RECORDS_COL, id);
+    console.log('Attempting to delete payment record document:', id);
+    await deleteDoc(docRef);
+    console.log('Successfully deleted payment record:', id);
+  } catch (err) {
+    console.error('CRITICAL: Failed to delete payment record:', err);
+    throw err;
   }
 }
 

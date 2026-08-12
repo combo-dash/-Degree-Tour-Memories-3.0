@@ -43,11 +43,16 @@ export const FirebaseSettingsModal: React.FC<FirebaseSettingsModalProps> = ({
   if (!isOpen) return null;
 
   const handleSeedData = async () => {
+    if (!window.confirm('Are you absolutely sure? This will PERMANENTLY delete 100% of the data including all payments, memories, and users!')) return;
+    
     setSeedingStatus('seeding');
     const success = await seedInitialFirestoreData();
     if (success) {
       setSeedingStatus('success');
-      setTimeout(() => setSeedingStatus(null), 3000);
+      setTimeout(() => {
+        setSeedingStatus(null);
+        window.location.reload();
+      }, 2000);
     } else {
       setSeedingStatus('error');
     }

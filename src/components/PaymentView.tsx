@@ -16,7 +16,8 @@ import {
   Filter,
   Info,
   CheckCheck,
-  AlertCircle
+  AlertCircle,
+  Edit2
 } from 'lucide-react';
 import { UserSession } from './AuthScreen';
 import {
@@ -26,7 +27,9 @@ import {
   updatePaymentAccountsInFirestore,
   subscribePaymentRecords,
   addPaymentRecordToFirestore,
-  updatePaymentRecordStatusInFirestore
+  updatePaymentRecordStatusInFirestore,
+  deletePaymentFromFirestore,
+  clearAllPaymentsFromFirestore
 } from '../firebase';
 
 export interface PaymentAccount {
@@ -119,6 +122,7 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
   const [accounts, setAccounts] = useState<PaymentAccount[]>(DEFAULT_ACCOUNTS);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('bkash-1');
   const [records, setRecords] = useState<PaymentRecord[]>(INITIAL_RECORDS);
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const unsubFee = subscribePackageFee(setPackageFee);
@@ -131,6 +135,8 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
       unsubRecords();
     };
   }, []);
+
+  const visibleRecords = records.filter(r => !deletedIds.has(r.id));
 
   // Copy state feedback
   const [copiedNumber, setCopiedNumber] = useState<string | null>(null);
@@ -161,7 +167,8 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId) || accounts[0];
 
-  const handleCopy = (num: string) => {
+  const handleCopy = (num?: string) => {
+    if (!num) return;
     navigator.clipboard.writeText(num.replace(/-/g, ''));
     setCopiedNumber(num);
     setTimeout(() => setCopiedNumber(null), 2000);
@@ -260,7 +267,7 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
     await updatePaymentRecordStatusInFirestore(id, newStatus);
   };
 
-  const filteredRecords = records.filter((r) => {
+  const filteredRecords = visibleRecords.filter((r) => {
     const matchesSearch =
       r.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       r.rollNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -589,6 +596,34 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
 
             <div className="flex items-center gap-2">
               <button
+                onClick={async () => {
+                  if (window.confirm('Are you sure you want to delete ALL payment records? This cannot be undone.')) {
+                    // Optimistic clear
+                    const recordIds = records.map(r => r.id);
+                    setDeletedIds(prev => {
+                      const next = new Set(prev);
+                      recordIds.forEach(id => next.add(id));
+                      return next;
+                    });
+                    
+                    const success = await clearAllPaymentsFromFirestore();
+                    if (!success) {
+                      // Rollback on fail
+                      setDeletedIds(prev => {
+                        const next = new Set(prev);
+                        recordIds.forEach(id => next.delete(id));
+                        return next;
+                      });
+                      alert('Failed to clear all records. Please try again.');
+                    }
+                  }
+                }}
+                className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md transition-all active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear All</span>
+              </button>
+              <button
                 onClick={() => setIsSubmitModalOpen(true)}
                 className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md"
               >
@@ -728,10 +763,24 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ currentUser }) => {
                             <button
                               onClick={async () => {
                                 if (window.confirm('Are you sure you want to delete this payment record?')) {
-                                  await deletePaymentFromFirestore(rec.id);
+                                  // Optimistic delete
+                                  setDeletedIds(prev => new Set(prev).add(rec.id));
+                                  
+                                  try {
+                                    await deletePaymentFromFirestore(rec.id);
+                                  } catch (err) {
+                                    // Rollback
+                                    setDeletedIds(prev => {
+                                      const next = new Set(prev);
+                                      next.delete(rec.id);
+                                      return next;
+                                    });
+                                    alert('Failed to delete record. Please check your connection.');
+                                  }
                                 }
                               }}
-                              className="p-1 text-rose-400 hover:bg-rose-500/20 rounded cursor-pointer"
+                              className="p-1 text-rose-400 hover:bg-rose-500/20 rounded cursor-pointer transition-colors"
+                              title="Delete Record"
                             >
                               <Trash2 size={14} />
                             </button>
