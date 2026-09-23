@@ -14,7 +14,8 @@ import {
   Firestore,
   getDocs,
   setDoc,
-  writeBatch
+  writeBatch,
+  deleteField
 } from 'firebase/firestore';
 import defaultConfig from '../firebase-applet-config.json';
 import { AppUser, Memory, Batchmate, TourSpot, ScheduleItem, TourPackage, BusPackage, Comment, ChatMessage } from './types';
@@ -599,9 +600,21 @@ export async function updateBusInFirestore(id: string, updates: Partial<BusPacka
   if (!db) return;
   try {
     const docRef = doc(db, BUSES_COL, id);
-    await setDoc(docRef, updates, { merge: true });
+    if (updates.seats) {
+      await updateDoc(docRef, {
+        ...updates,
+        'seats.L1': deleteField()
+      });
+    } else {
+      await setDoc(docRef, updates, { merge: true });
+    }
   } catch (e) {
-    console.error('Error updating bus:', e);
+    try {
+      const docRef = doc(db, BUSES_COL, id);
+      await setDoc(docRef, updates, { merge: true });
+    } catch (err) {
+      console.error('Error updating bus:', err);
+    }
   }
 }
 

@@ -169,7 +169,7 @@ export default function App() {
               Degree Tour 3.0 • Tour Management System
             </p>
             <p>
-              Powered by Firebase Firestore Realtime Sync • Batch '88
+              Powered by Tanvir Ahmed Tuhin
             </p>
           </div>
         </footer>

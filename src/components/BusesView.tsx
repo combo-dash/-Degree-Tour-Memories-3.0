@@ -385,7 +385,7 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates, o
       else if (col === 4) adjCol = 3;
     }
 
-    if (adjCol !== null && activeBus) {
+    if (!isAdminOrSuper && adjCol !== null && activeBus) {
       const adjSeatId = seatId.charAt(0) + adjCol;
       const normalizedSeatsMap = getNormalizedSeatsMap(activeBus);
       const adjSeat = normalizedSeatsMap[adjSeatId];
@@ -621,20 +621,61 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates, o
       {/* BUS SEATING CONTAINER */}
       {activeBus && (
         <div className="p-5 sm:p-8 rounded-3xl bg-slate-950/90 border border-slate-800 max-w-xl mx-auto shadow-2xl space-y-6">
-          {/* FRONT CABIN BAR */}
-          <div className="flex items-center justify-between gap-4 pb-4 border-b border-slate-800">
-            <div className="flex flex-col items-center gap-1">
-              <div className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 text-xs font-black uppercase tracking-wider flex items-center gap-2">
-                <span>🚪 FRONT DOOR</span>
-              </div>
-              <span className="text-[10px] font-black text-pink-500 uppercase tracking-widest">Female Side</span>
+          {/* FRONT CABIN / DASHBOARD */}
+          <div className="space-y-3 pb-4 border-b border-slate-800">
+            {/* Windshield Indicator */}
+            <div className="w-full py-1.5 px-4 rounded-xl bg-gradient-to-r from-slate-900 via-indigo-950/60 to-slate-900 border border-slate-800/80 flex items-center justify-center text-[10px] font-black uppercase tracking-widest text-slate-400 select-none shadow-sm">
+              <span className="flex items-center gap-1.5">
+                <span>🚍</span>
+                <span>FRONT WINDSHIELD (সামনের উইন্ডশিল্ড)</span>
+              </span>
             </div>
-            
-            <div className="flex flex-col items-center gap-1">
-              <div className="px-4 py-2 rounded-xl bg-indigo-950/80 border border-indigo-800/60 text-indigo-300 text-xs font-black uppercase tracking-wider flex items-center gap-2">
-                <span>🛞 DRIVER</span>
+
+            {/* Front Cabin Elements aligned with 5-column seat layout */}
+            <div className="grid grid-cols-5 gap-2 sm:gap-3 items-center">
+              {/* Left Door (Col 1 & Col 2) */}
+              <div className="col-span-2 flex flex-col items-center justify-center p-2.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm text-center">
+                <span className="text-xs font-black text-slate-200 flex items-center gap-1.5">
+                  <span>🚪</span>
+                  <span>FRONT DOOR</span>
+                </span>
+                <span className="text-[10px] font-black text-pink-400 uppercase tracking-wider mt-0.5">
+                  Female Side
+                </span>
               </div>
-              <span className="text-[10px] font-black text-sky-500 uppercase tracking-widest">Male Side</span>
+
+              {/* Center ENGINE BOX (Directly in front of the Middle Aisle) */}
+              <div className="col-span-1 flex flex-col items-center justify-center p-2 rounded-2xl bg-gradient-to-b from-amber-950/50 via-slate-900 to-slate-950 border border-amber-600/40 shadow-inner text-center select-none relative overflow-hidden group">
+                {/* Slats / Grill vents */}
+                <div className="flex gap-1 mb-1 opacity-50">
+                  <div className="w-1.5 h-0.5 bg-amber-400 rounded-full" />
+                  <div className="w-1.5 h-0.5 bg-amber-400 rounded-full" />
+                  <div className="w-1.5 h-0.5 bg-amber-400 rounded-full" />
+                </div>
+                <div className="w-6 h-6 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xs font-bold mb-0.5 shadow-sm">
+                  ⚙️
+                </div>
+                <span className="text-[9px] sm:text-[10px] font-black text-amber-300 tracking-tight uppercase leading-none">
+                  ENGINE
+                </span>
+                <span className="text-[8px] sm:text-[9px] font-extrabold text-amber-400/90 tracking-widest uppercase">
+                  BOX
+                </span>
+                <span className="text-[8px] font-semibold text-slate-400 mt-0.5 hidden sm:block">
+                  ইঞ্জিন বক্স
+                </span>
+              </div>
+
+              {/* Right Driver (Col 4 & Col 5) */}
+              <div className="col-span-2 flex flex-col items-center justify-center p-2.5 rounded-2xl bg-indigo-950/70 border border-indigo-800/60 shadow-sm text-center">
+                <span className="text-xs font-black text-indigo-200 flex items-center gap-1.5">
+                  <span>🛞</span>
+                  <span>DRIVER</span>
+                </span>
+                <span className="text-[10px] font-black text-sky-400 uppercase tracking-wider mt-0.5">
+                  Male Side
+                </span>
+              </div>
             </div>
           </div>
 

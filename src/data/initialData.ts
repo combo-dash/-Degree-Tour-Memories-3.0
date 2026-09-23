@@ -86,24 +86,19 @@ export function getNormalizedSeatsMap(bus: Partial<BusPackage>): Record<string, 
     });
   }
 
-  // Automatic Migration: If old data had 'L1', convert L1 -> K3, shift old K3 -> K4, and old K4 -> K5
-  if (existingSeatsById['L1']) {
+  // One-time legacy migration from old 4-seat K row + L1 layout
+  // ONLY run if K5 is NOT yet present and L1 is present
+  if (existingSeatsById['L1'] && !existingSeatsById['K5']) {
     const oldL1 = existingSeatsById['L1'];
     const oldK3 = existingSeatsById['K3'];
     const oldK4 = existingSeatsById['K4'];
 
-    delete existingSeatsById['L1'];
-
-    if (oldK4 && !existingSeatsById['K5']) {
-      existingSeatsById['K5'] = { ...oldK4, id: 'K5' };
-    }
-    if (oldK3) {
-      existingSeatsById['K4'] = { ...oldK3, id: 'K4' };
-    }
-    if (oldL1) {
-      existingSeatsById['K3'] = { ...oldL1, id: 'K3' };
-    }
+    existingSeatsById['K5'] = oldK4 ? { ...oldK4, id: 'K5' } : { id: 'K5', status: 'available' };
+    existingSeatsById['K4'] = oldK3 ? { ...oldK3, id: 'K4' } : { id: 'K4', status: 'available' };
+    existingSeatsById['K3'] = oldL1 ? { ...oldL1, id: 'K3' } : { id: 'K3', status: 'available' };
   }
+  // Permanently ensure L1 never exists in normalized seat maps
+  delete existingSeatsById['L1'];
 
   const finalMap: Record<string, BusSeat> = {};
   Object.keys(defaultMap).forEach((seatId) => {
