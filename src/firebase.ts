@@ -1,6 +1,7 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
+  initializeFirestore,
   collection,
   onSnapshot,
   addDoc,
@@ -71,15 +72,30 @@ try {
     }
     
     // Pass custom firestore databaseId if specified in config, else default
-    const dbId = config.firestoreDatabaseId && config.firestoreDatabaseId !== '(default)' 
+    const customDbId = config.firestoreDatabaseId && config.firestoreDatabaseId !== '(default)' 
       ? config.firestoreDatabaseId 
-      : '(default)';
-    console.log('Firebase Init: projectId=', config.projectId, 'dbId=', dbId);
+      : undefined;
+    console.log('Firebase Init: projectId=', config.projectId, 'customDbId=', customDbId);
     
-    if (config.firestoreDatabaseId && config.firestoreDatabaseId !== '(default)') {
-      db = getFirestore(app, config.firestoreDatabaseId);
-    } else {
-      db = getFirestore(app);
+    try {
+      if (customDbId) {
+        db = initializeFirestore(app, {
+          experimentalAutoDetectLongPolling: true,
+          ignoreUndefinedProperties: true
+        }, customDbId);
+      } else {
+        db = initializeFirestore(app, {
+          experimentalAutoDetectLongPolling: true,
+          ignoreUndefinedProperties: true
+        });
+      }
+    } catch (initErr) {
+      console.warn('initializeFirestore fallback to getFirestore:', initErr);
+      if (customDbId) {
+        db = getFirestore(app, customDbId);
+      } else {
+        db = getFirestore(app);
+      }
     }
     isConnectedToFirestore = true;
     console.log('Firebase Firestore DB initialized successfully:', !!db);
@@ -130,7 +146,8 @@ export function subscribeMessages(onData: (messages: ChatMessage[]) => void) {
         onData(list);
       },
       (err) => {
-        console.error('Firestore messages subscription error:', err);
+        console.warn('Firestore messages subscription error:', err);
+        onData([]);
       }
     );
     return unsubscribe;
@@ -305,6 +322,32 @@ export function subscribeMemories(
   }
 }
 
+function deduplicateBatchmates(list: Batchmate[]): Batchmate[] {
+  const seenRolls = new Map<string, Batchmate>();
+  for (const item of list) {
+    const key = (item.rollNo || '').trim().toLowerCase();
+    if (!key) {
+      seenRolls.set(item.id, item);
+      continue;
+    }
+    const existing = seenRolls.get(key);
+    if (!existing) {
+      seenRolls.set(key, item);
+    } else {
+      // Merge so we prefer non-empty photos and updated names/phones
+      seenRolls.set(key, {
+        ...existing,
+        ...item,
+        photoUrl: item.photoUrl || existing.photoUrl,
+        phone: (item.phone && item.phone !== 'N/A') ? item.phone : existing.phone,
+        quote: item.quote || existing.quote,
+        awards: (item.awards && item.awards.length > 0) ? item.awards : existing.awards
+      });
+    }
+  }
+  return Array.from(seenRolls.values());
+}
+
 export function subscribeBatchmates(onData: (batchmates: Batchmate[]) => void) {
   if (!db) {
     onData(INITIAL_BATCHMATES);
@@ -312,40 +355,29 @@ export function subscribeBatchmates(onData: (batchmates: Batchmate[]) => void) {
   }
 
   try {
-    const q = query(collection(db, BATCHMATES_COL));
+    const q = query(collection(db, BATCHMATES_COL), orderBy('createdAt', 'asc'));
     const unsubscribe = onSnapshot(
       q,
       async (snapshot) => {
         if (snapshot.empty) {
           onData(INITIAL_BATCHMATES);
         } else {
-          const demoRolls = ['DEG-88-001', 'DEG-88-014', 'DEG-88-025', 'DEG-88-038', 'DEG-88-042', 'DEG-88-050'];
-          const demoNames = ['তানভীর তুহিন', 'সাব্বির আহমেদ', 'মালিহা রহমান', 'শাহরিয়ার নাফিস', 'অনন্যা দাস', 'ফারহান চৌধুরী'];
-
-          const list: Batchmate[] = [];
-          for (const d of snapshot.docs) {
-            const data = d.data() as Omit<Batchmate, 'id'>;
-            const isDemo = demoRolls.includes(data.rollNo) || demoNames.some(n => data.name?.includes(n));
-            if (isDemo) {
-              // Permanently delete demo batchmate from Firestore
-              try {
-                await deleteDoc(doc(db, BATCHMATES_COL, d.id));
-              } catch (err) {
-                console.warn('Failed to delete demo batchmate:', err);
-              }
-            } else {
-              list.push({
-                id: d.id,
-                ...data
-              });
-            }
-          }
-          onData(list);
+          const list: Batchmate[] = snapshot.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as Omit<Batchmate, 'id'>)
+          }));
+          onData(deduplicateBatchmates(list));
         }
       },
       (err) => {
         console.warn('Firestore batchmates subscription error:', err);
-        onData(INITIAL_BATCHMATES);
+        // Fallback to unsorted if orderBy fails (e.g. index not created yet)
+        const qFallback = query(collection(db, BATCHMATES_COL));
+        onSnapshot(qFallback, (snap) => {
+           const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Batchmate[];
+           list.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+           onData(deduplicateBatchmates(list));
+        });
       }
     );
     return unsubscribe;
@@ -489,8 +521,24 @@ export async function addCommentToFirestore(memoryId: string, comment: Comment) 
 
 export async function addBatchmateToFirestore(batchmate: Omit<Batchmate, 'id'>) {
   if (!db) return 'temp-' + Date.now();
-  const docRef = await addDoc(collection(db, BATCHMATES_COL), batchmate);
-  return docRef.id;
+  const cleanRoll = String(batchmate.rollNo || '').trim();
+  const docId = cleanRoll
+    ? `bm-${cleanRoll.toLowerCase().replace(/[^a-z0-9_-]/g, '_')}`
+    : `bm-${Date.now()}`;
+  
+  const dataWithTime = {
+    ...batchmate,
+    rollNo: cleanRoll,
+    createdAt: Date.now()
+  };
+
+  try {
+    await setDoc(doc(db, BATCHMATES_COL, docId), dataWithTime, { merge: true });
+    return docId;
+  } catch (err) {
+    console.error('Error in addBatchmateToFirestore:', err);
+    return docId;
+  }
 }
 
 export async function updateBatchmateInFirestore(id: string, updates: Partial<Batchmate>) {
@@ -646,7 +694,33 @@ export async function seedInitialFirestoreData(): Promise<boolean> {
   }
 }
 
+function deduplicateUsers(list: AppUser[]): AppUser[] {
+  const seen = new Map<string, AppUser>();
+  for (const u of list) {
+    const key = (u.rollNo || u.email || u.id || '').trim().toLowerCase();
+    if (!key) {
+      seen.set(u.id, u);
+      continue;
+    }
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, u);
+    } else {
+      // Merge properties so we retain password and avatar
+      seen.set(key, {
+        ...existing,
+        ...u,
+        password: u.password || existing.password,
+        avatarUrl: u.avatarUrl || existing.avatarUrl,
+        phone: (u.phone && u.phone !== 'N/A') ? u.phone : existing.phone
+      });
+    }
+  }
+  return Array.from(seen.values());
+}
+
 export function subscribeUsers(onData: (users: AppUser[]) => void) {
+  console.log('subscribeUsers called, db exists:', !!db);
   if (!db) {
     onData([]);
     return () => {};
@@ -661,10 +735,11 @@ export function subscribeUsers(onData: (users: AppUser[]) => void) {
           id: d.id,
           ...(d.data() as Omit<AppUser, 'id'>)
         }));
-        onData(list);
+        onData(deduplicateUsers(list));
       },
       (error) => {
-        console.error('Snapshot error in subscribeUsers:', error);
+        console.warn('Snapshot error in subscribeUsers, keeping existing or empty data:', error);
+        onData([]);
       }
     );
     return unsubscribe;
@@ -674,15 +749,62 @@ export function subscribeUsers(onData: (users: AppUser[]) => void) {
   }
 }
 
+export async function getAllUsersDirectly(): Promise<AppUser[]> {
+  if (!db) return [];
+  try {
+    const snap = await getDocs(collection(db, USERS_COL));
+    const list = snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as Omit<AppUser, 'id'>)
+    }));
+    return deduplicateUsers(list);
+  } catch (err) {
+    console.error('Error in getAllUsersDirectly:', err);
+    return [];
+  }
+}
+
+export async function resetUserPasswordInFirestore(rollOrEmail: string, newPass: string): Promise<boolean> {
+  if (!db) return false;
+  try {
+    const queryTerm = rollOrEmail.trim().toLowerCase();
+    const snap = await getDocs(collection(db, USERS_COL));
+    const targetDoc = snap.docs.find((d) => {
+      const data = d.data() as AppUser;
+      return (
+        String(data.rollNo || '').trim().toLowerCase() === queryTerm ||
+        String(data.email || '').trim().toLowerCase() === queryTerm
+      );
+    });
+
+    if (targetDoc) {
+      await updateDoc(doc(db, USERS_COL, targetDoc.id), { password: newPass });
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('Error in resetUserPasswordInFirestore:', err);
+    return false;
+  }
+}
+
 export async function addUserToFirestore(user: AppUser) {
   if (!db) return;
   try {
     const { id, ...data } = user;
-    if (id) {
-      await setDoc(doc(db, USERS_COL, id), data);
-    } else {
-      await addDoc(collection(db, USERS_COL), data);
-    }
+    const cleanRoll = String(user.rollNo || '').trim();
+    const cleanEmail = String(user.email || '').trim().toLowerCase();
+    
+    // Choose deterministic document ID to prevent duplicate user documents
+    const docId = id && !id.startsWith('user-')
+      ? id
+      : cleanRoll
+      ? `user-${cleanRoll.toLowerCase().replace(/[^a-z0-9_-]/g, '_')}`
+      : cleanEmail
+      ? `user-${cleanEmail.replace(/[^a-z0-9_-]/g, '_')}`
+      : id || `user-${Date.now()}`;
+
+    await setDoc(doc(db, USERS_COL, docId), data, { merge: true });
   } catch (e) {
     console.error('Error adding user:', e);
   }

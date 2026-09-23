@@ -1,41 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { ViewTab, Memory, Batchmate, TourSpot, ScheduleItem, Comment } from './types';
+import { ViewTab, Batchmate, BusPackage } from './types';
 import { AuthScreen, UserSession } from './components/AuthScreen';
+import { AdminLoginModal } from './components/AdminLoginModal';
 import { SidebarNav } from './components/SidebarNav';
-import { DashboardView } from './components/DashboardView';
-import { PaymentView } from './components/PaymentView';
 import { BusesView } from './components/BusesView';
-import { NoticesView } from './components/NoticesView';
-import { ChatView } from './components/ChatView';
 import { AdminsView } from './components/AdminsView';
-import { ActivityLogsView } from './components/ActivityLogsView';
 import { SettingsView } from './components/SettingsView';
-import { MemoryFeed } from './components/MemoryFeed';
-import { PhotoGallery } from './components/PhotoGallery';
-import { InteractiveMap } from './components/InteractiveMap';
-import { BatchmateDirectory } from './components/BatchmateDirectory';
-import { TourItinerary } from './components/TourItinerary';
-import { ToursView } from './components/ToursView';
-import { AddMemoryModal } from './components/AddMemoryModal';
 import { FirebaseSettingsModal } from './components/FirebaseSettingsModal';
 import {
-  subscribeMemories,
   subscribeBatchmates,
-  subscribeTourSpots,
-  subscribeSchedule,
-  addMemoryToFirestore,
-  deleteMemoryFromFirestore,
-  clearAllMemoriesFromFirestore,
-  likeMemoryInFirestore,
-  addCommentToFirestore,
+  subscribeBuses,
   addBatchmateToFirestore,
   updateBatchmateInFirestore,
-  deleteBatchmateFromFirestore,
   getActiveFirebaseConfig,
-  isConnectedToFirestore,
   updateUserInFirestore
 } from './firebase';
-import { INITIAL_MEMORIES, INITIAL_BATCHMATES, INITIAL_TOUR_SPOTS, INITIAL_SCHEDULE } from './data/initialData';
+import { INITIAL_BATCHMATES, INITIAL_BUSES } from './data/initialData';
 import { saveAdminAvatar } from './utils/adminAvatars';
 
 export default function App() {
@@ -68,154 +48,44 @@ export default function App() {
   const [language, setLanguage] = useState<'EN' | 'BN'>('EN');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
-  const [activeTab, setActiveTab] = useState<ViewTab>('dashboard');
-  const [memories, setMemories] = useState<Memory[]>(INITIAL_MEMORIES);
+  const [activeTab, setActiveTab] = useState<ViewTab>('buses');
   const [batchmates, setBatchmates] = useState<Batchmate[]>(INITIAL_BATCHMATES);
-  const [spots, setSpots] = useState<TourSpot[]>(INITIAL_TOUR_SPOTS);
-  const [schedule, setSchedule] = useState<ScheduleItem[]>(INITIAL_SCHEDULE);
+  const [buses, setBuses] = useState<BusPackage[]>(INITIAL_BUSES);
 
   // Modals
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isFirebaseModalOpen, setIsFirebaseModalOpen] = useState(false);
-
-  const config = getActiveFirebaseConfig();
-  const activeProjectId = config?.projectId || 'degreetourmemories88';
+  const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
 
   // Realtime Firestore Subscriptions
   useEffect(() => {
-    const unsubMem = subscribeMemories((data) => {
-      if (data) setMemories(data);
-    });
-
     const unsubBm = subscribeBatchmates((data) => {
       if (data) setBatchmates(data);
     });
 
-    const unsubSpots = subscribeTourSpots((data) => {
-      if (data) setSpots(data);
-    });
-
-    const unsubSch = subscribeSchedule((data) => {
-      if (data) setSchedule(data);
+    const unsubBuses = subscribeBuses((data) => {
+      if (data) setBuses(data);
     });
 
     return () => {
-      unsubMem();
       unsubBm();
-      unsubSpots();
-      unsubSch();
+      unsubBuses();
     };
   }, []);
+
+  const isAdminOrSuper = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
+
+  // If user is not admin/superadmin, ensure they cannot stay on or view 'settings'
+  useEffect(() => {
+    if (activeTab === 'settings' && !isAdminOrSuper) {
+      setActiveTab('buses');
+    }
+  }, [activeTab, isAdminOrSuper]);
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('degree_tour_current_user');
+    setActiveTab('buses');
   };
-
-  // Handlers
-  const handleLike = async (memoryId: string, currentLikes: number) => {
-    // Optimistic local update
-    setMemories((prev) =>
-      prev.map((m) => (m.id === memoryId ? { ...m, likes: (m.likes || 0) + 1 } : m))
-    );
-    await likeMemoryInFirestore(memoryId, currentLikes);
-  };
-
-  const handleAddComment = async (memoryId: string, comment: Comment) => {
-    // Optimistic local update
-    setMemories((prev) =>
-      prev.map((m) =>
-        m.id === memoryId ? { ...m, comments: [...(m.comments || []), comment] } : m
-      )
-    );
-    await addCommentToFirestore(memoryId, comment);
-  };
-
-  const handleDeleteMemory = async (memoryId: string) => {
-    setMemories((prev) => prev.filter((m) => m.id !== memoryId));
-    await deleteMemoryFromFirestore(memoryId);
-  };
-
-  const handleClearAllMemories = async () => {
-    setMemories([]);
-    await clearAllMemoriesFromFirestore();
-  };
-
-  const handleAddMemory = async (
-    newMemData: Omit<Memory, 'id' | 'likes' | 'timestamp' | 'comments'>
-  ) => {
-    try {
-      const newDocId = await addMemoryToFirestore(newMemData);
-      
-      // Add locally to immediate view
-      const newMemoryObj: Memory = {
-        ...newMemData,
-        id: newDocId || 'mem-' + Date.now(),
-        likes: 0,
-        timestamp: Date.now(),
-        comments: []
-      };
-
-      setMemories((prev) => [newMemoryObj, ...prev]);
-      setIsAddModalOpen(false);
-      setActiveTab('gallery');
-    } catch (err) {
-      console.error('Failed to add memory:', err);
-      setIsAddModalOpen(false);
-      setActiveTab('gallery');
-    }
-  };
-
-  const handleAddBatchmate = async (newBm: Omit<Batchmate, 'id'>) => {
-    const newId = await addBatchmateToFirestore(newBm);
-    setBatchmates((prev) => [...prev, { ...newBm, id: newId }]);
-  };
-
-  const handleUpdateBatchmate = async (id: string, updates: Partial<Batchmate>) => {
-    setBatchmates((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, ...updates } : b))
-    );
-    await updateBatchmateInFirestore(id, updates);
-  };
-
-  const handleDeleteBatchmate = async (id: string) => {
-    setBatchmates((prev) => prev.filter((b) => b.id !== id));
-    await deleteBatchmateFromFirestore(id);
-  };
-
-  // If no user is logged in, show AuthScreen as the FIRST INTERFACE
-  if (!currentUser) {
-    return (
-      <AuthScreen
-        onSignInSuccess={(user) => {
-          setCurrentUser(user);
-          setActiveTab('dashboard');
-          if (user.role === 'student') {
-            const exists = batchmates.some(
-              (b) => b.rollNo === user.rollNo || b.name.toLowerCase() === user.name.toLowerCase()
-            );
-            if (!exists) {
-              addBatchmateToFirestore({
-                name: user.name,
-                nickName: user.name.split(' ')[0] || user.name,
-                rollNo: user.rollNo || 'DEG-88-' + Math.floor(100 + Math.random() * 900),
-                section: user.degreeType?.includes('B') ? 'B' : 'A',
-                quote: 'Degree Tour 3.0 memories forever!',
-                photoUrl: user.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-                favoriteMemory: 'Degree Tour 3.0',
-                phone: user.phone || '01700-000000',
-                awards: ['ট্যুর ফেলো 🌟']
-              }).catch((err) => console.warn('Failed to register student in directory:', err));
-            }
-          }
-        }}
-        language={language}
-        setLanguage={setLanguage}
-        theme={theme}
-        setTheme={setTheme}
-      />
-    );
-  }
 
   return (
     <div className={`min-h-screen font-sans selection:bg-amber-500 selection:text-slate-950 flex flex-col lg:flex-row ${
@@ -227,78 +97,31 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         currentUser={currentUser}
-        onSignOut={() => setCurrentUser(null)}
+        onSignOut={handleLogout}
         language={language}
+        onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
       />
 
       {/* Main Content Area */}
       <div className="flex-1 min-w-0 flex flex-col min-h-screen">
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
           
-          {activeTab === 'dashboard' && (
-            <DashboardView
-              setActiveTab={setActiveTab}
-              currentUser={currentUser}
-              memories={memories}
-              batchmates={batchmates}
-              spots={spots}
-              schedule={schedule}
-              onOpenAddModal={() => setIsAddModalOpen(true)}
-            />
-          )}
-
-          {activeTab === 'payment' && (
-            <PaymentView currentUser={currentUser} />
-          )}
-
-          {activeTab === 'students' && (
-            <BatchmateDirectory
-              batchmates={batchmates}
-              onAddBatchmate={handleAddBatchmate}
-              onUpdateBatchmate={handleUpdateBatchmate}
-              onDeleteBatchmate={handleDeleteBatchmate}
-              currentUser={currentUser}
-            />
-          )}
-
-          {activeTab === 'tours' && (
-            <div className="space-y-8">
-              <ToursView currentUser={currentUser} />
-            </div>
-          )}
-
           {activeTab === 'buses' && (
-            <BusesView currentUser={currentUser} batchmates={batchmates} />
-          )}
-
-          {activeTab === 'notices' && (
-            <NoticesView currentUser={currentUser} />
-          )}
-
-          {activeTab === 'gallery' && (
-            <PhotoGallery
-              memories={memories}
-              onLike={handleLike}
-              onAddMemoryClick={() => setIsAddModalOpen(true)}
+            <BusesView
               currentUser={currentUser}
-              onDeleteMemory={handleDeleteMemory}
-              onClearAllMemories={handleClearAllMemories}
+              batchmates={batchmates}
+              onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
             />
-          )}
-
-          {activeTab === 'chat' && (
-            <ChatView currentUser={currentUser} />
           )}
 
           {activeTab === 'admins' && (
-            <AdminsView currentUser={currentUser} />
+            <AdminsView
+              currentUser={currentUser}
+              onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
+            />
           )}
 
-          {activeTab === 'activityLogs' && (
-            <ActivityLogsView />
-          )}
-
-          {activeTab === 'settings' && (
+          {activeTab === 'settings' && isAdminOrSuper && (
             <SettingsView
               language={language}
               setLanguage={setLanguage}
@@ -307,6 +130,7 @@ export default function App() {
               onOpenFirebaseModal={() => setIsFirebaseModalOpen(true)}
               currentUser={currentUser}
               onLogout={handleLogout}
+              onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
               onUpdateUserAvatar={async (newAvatarUrl) => {
                 if (currentUser) {
                   const updatedUser = { ...currentUser, avatarUrl: newAvatarUrl };
@@ -323,14 +147,12 @@ export default function App() {
                   if (currentUser.id) {
                     await updateUserInFirestore(currentUser.id, updatedData);
                     // Also update in batchmates collection if this user is a batchmate
-                    // Note: Since we don't have the batchmate document ID directly here, 
-                    // and assuming rollNo is the unique link:
                     const batchmate = batchmates.find(b => b.rollNo === currentUser.rollNo);
                     if (batchmate) {
-                        await updateBatchmateInFirestore(batchmate.id, {
-                            name: updatedData.name !== undefined ? updatedData.name : batchmate.name,
-                            phone: updatedData.phone !== undefined ? updatedData.phone : batchmate.phone
-                        });
+                      await updateBatchmateInFirestore(batchmate.id, {
+                        name: updatedData.name !== undefined ? updatedData.name : batchmate.name,
+                        phone: updatedData.phone !== undefined ? updatedData.phone : batchmate.phone
+                      });
                     }
                   }
                 }
@@ -344,7 +166,7 @@ export default function App() {
         <footer className="border-t border-slate-900 bg-slate-950 py-6 text-center text-xs text-slate-500 mt-auto">
           <div className="max-w-7xl mx-auto px-4 space-y-1">
             <p className="font-bold text-slate-400">
-              Degree Tour 3.0 • Tour Management System & Digital Memory Wall
+              Degree Tour 3.0 • Tour Management System
             </p>
             <p>
               Powered by Firebase Firestore Realtime Sync • Batch '88
@@ -353,14 +175,17 @@ export default function App() {
         </footer>
       </div>
 
-      {/* Modals */}
-      <AddMemoryModal
-        isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        onSubmit={handleAddMemory}
-        currentUser={currentUser}
+      {/* Admin Login Modal */}
+      <AdminLoginModal
+        isOpen={isAdminLoginModalOpen}
+        onClose={() => setIsAdminLoginModalOpen(false)}
+        onSignInSuccess={(user) => {
+          setCurrentUser(user);
+        }}
+        language={language}
       />
 
+      {/* Firebase Settings Modal */}
       <FirebaseSettingsModal
         isOpen={isFirebaseModalOpen}
         onClose={() => setIsFirebaseModalOpen(false)}

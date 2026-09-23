@@ -27,6 +27,7 @@ import { createDefaultSeatsMap, getNormalizedSeatsMap, sanitizeSeatsMapForFirest
 interface BusesViewProps {
   currentUser?: UserSession | null;
   batchmates?: Batchmate[];
+  onOpenAdminLogin?: () => void;
 }
 
 // Compress image to small base64 (~20-50KB) for fast Firestore storage
@@ -68,7 +69,7 @@ const compressAvatarFile = (file: File): Promise<string> => {
   });
 };
 
-export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates }) => {
+export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates, onOpenAdminLogin }) => {
   const [buses, setBuses] = useState<BusPackage[]>([]);
   const [selectedBusId, setSelectedBusId] = useState<string>('');
 
@@ -120,18 +121,43 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
       if (!selectedBusId && data.length > 0) {
         setSelectedBusId(data[0].id);
       }
+      // Silently auto-migrate any existing bus in Firestore with legacy L1 seat to K3
+      data.forEach((b) => {
+        if (b.seats && typeof b.seats === 'object' && ('L1' in b.seats)) {
+          const normalized = getNormalizedSeatsMap(b);
+          const sanitized = sanitizeSeatsMapForFirestore(normalized);
+          updateBusInFirestore(b.id, { seats: sanitized }).catch(() => {});
+        }
+      });
     });
     return () => unsub();
-  }, []);
+  }, [selectedBusId]);
 
   const activeBus = buses.find((b) => b.id === selectedBusId) || buses[0] || INITIAL_BUSES[0];
+
+  // Check if seat is on restricted side for a student based on gender
+  const isSeatRestrictedForUser = (seatId: string): boolean => {
+    if (isAdminOrSuper || !currentUser?.gender) return false;
+    const isRowK = seatId.startsWith('K');
+    const colNum = parseInt(seatId.substring(1), 10);
+    if (isRowK) {
+      return (
+        ((colNum === 1 || colNum === 2) && currentUser.gender === 'male') ||
+        ((colNum === 4 || colNum === 5) && currentUser.gender === 'female')
+      );
+    }
+    return (
+      ((colNum === 1 || colNum === 2) && currentUser.gender === 'male') ||
+      ((colNum === 3 || colNum === 4) && currentUser.gender === 'female')
+    );
+  };
 
   // Helper to get seats array from activeBus seats map (guaranteeing ALL seats exist in exact order)
   const getSeatsArray = (bus: BusPackage): BusSeat[] => {
     const normalizedMap = getNormalizedSeatsMap(bus);
     const seatsList = Object.values(normalizedMap);
 
-    // Sort strictly by Row Letter (A, B, C...) then Column Number (1, 2, 3, 4)
+    // Sort strictly by Row Letter (A, B, C...) then Column Number (1, 2, 3, 4, 5)
     return seatsList.sort((a, b) => {
       const rowA = a.id.charAt(0);
       const rowB = b.id.charAt(0);
@@ -333,12 +359,13 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
     // side-based restriction
     const seatId = selectedSeat.id;
     const col = parseInt(seatId.substring(1), 10);
+    const isRowK = seatId.startsWith('K');
     if (!isAdminOrSuper) {
       if ((col === 1 || col === 2) && bookingGender === 'male') {
         setBookingError('এই সাইডটি শুধুমাত্র ছাত্রীদের জন্য সংরক্ষিত (Female Side). আপনি এখানে বুকিং করতে পারবেন না।');
         return;
       }
-      if ((col === 3 || col === 4) && bookingGender === 'female') {
+      if ((isRowK ? (col === 4 || col === 5) : (col === 3 || col === 4)) && bookingGender === 'female') {
         setBookingError('এই সাইডটি শুধুমাত্র ছাত্রদের জন্য সংরক্ষিত (Male Side). আপনি এখানে বুকিং করতে পারবেন না।');
         return;
       }
@@ -346,10 +373,17 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
 
     // Adjacent seat gender restriction algorithm
     let adjCol: number | null = null;
-    if (col === 1) adjCol = 2;
-    else if (col === 2) adjCol = 1;
-    else if (col === 3) adjCol = 4;
-    else if (col === 4) adjCol = 3;
+    if (isRowK) {
+      if (col === 1) adjCol = 2;
+      else if (col === 2) adjCol = 1;
+      else if (col === 4) adjCol = 5;
+      else if (col === 5) adjCol = 4;
+    } else {
+      if (col === 1) adjCol = 2;
+      else if (col === 2) adjCol = 1;
+      else if (col === 3) adjCol = 4;
+      else if (col === 4) adjCol = 3;
+    }
 
     if (adjCol !== null && activeBus) {
       const adjSeatId = seatId.charAt(0) + adjCol;
@@ -384,11 +418,16 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
 
   const seatsList = activeBus ? getSeatsArray(activeBus) : [];
 
-  // Group seats into 4-seat rows for 2x2 layout
-  const rows: BusSeat[][] = [];
-  for (let i = 0; i < seatsList.length; i += 4) {
-    rows.push(seatsList.slice(i, i + 4));
-  }
+  // Group seats by their row letter (A, B, C, ..., K)
+  const rowsMap = new Map<string, BusSeat[]>();
+  seatsList.forEach((seat) => {
+    const rowLetter = seat.id.charAt(0);
+    if (!rowsMap.has(rowLetter)) {
+      rowsMap.set(rowLetter, []);
+    }
+    rowsMap.get(rowLetter)!.push(seat);
+  });
+  const rows: BusSeat[][] = Array.from(rowsMap.values());
 
   return (
     <div className="space-y-6">
@@ -403,22 +442,51 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
       {/* HEADER BAR */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2">
-            <span>Bus & Seat Booking</span>
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">পছন্দের বাস ও সিট বুক করুন</p>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2">
+              <span>Bus & Seat Plan</span>
+            </h1>
+            {isAdminOrSuper ? (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Admin Edit Mode
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                Public View Mode (উন্মুক্ত ভিউ)
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            {isAdminOrSuper
+              ? 'বাস ও সিট বরাদ্দ এবং তথ্য এডিট করুন'
+              : 'বাসের তালিকা ও সিট প্ল্যান বিস্তারিত দেখুন (সবার জন্য উন্মুক্ত)'}
+          </p>
         </div>
 
         {isAdminOrSuper && (
-          <button
-            onClick={handleOpenAddBus}
-            className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Bus</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleOpenAddBus}
+              className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Bus</span>
+            </button>
+          </div>
         )}
       </div>
+
+      {/* Public View Notification Banner */}
+      {!isAdminOrSuper && (
+        <div className="p-3 sm:p-4 rounded-2xl bg-slate-900/90 border border-indigo-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-md">
+          <div className="flex items-center gap-2.5 text-slate-300">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0 animate-pulse" />
+            <span>
+              <strong className="text-emerald-400">উন্মুক্ত ভিউ মোড:</strong> যে কেউ কোনো পাসওয়ার্ড বা লগইন ছাড়াই সমস্ত বাসের সিট ও তথ্য দেখতে পারবেন। সিট বুকিং বা এডিটের জন্য এডমিন লগইন প্রয়োজন।
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* BUS SELECTOR TABS */}
       {buses.length > 0 && (
@@ -570,22 +638,33 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
             </div>
           </div>
 
-          {/* 2x2 SEAT GRID */}
+          {/* 2x2 SEAT GRID (WITH 5-SEAT BACK ROW) */}
           <div className="space-y-3">
-            {rows.map((rowSeats, rowIndex) => (
-              <div key={rowIndex} className="grid grid-cols-5 gap-2 sm:gap-3 items-center">
-                {/* Left 2 seats (Col 1 & Col 2) */}
-                {rowSeats.slice(0, 2).map((seat) => renderSeatButton(seat))}
+            {rows.map((rowSeats, rowIndex) => {
+              const isFiveSeatRow = rowSeats.length === 5;
+              return (
+                <div key={rowIndex} className="grid grid-cols-5 gap-2 sm:gap-3 items-center">
+                  {isFiveSeatRow ? (
+                    // Last 5-seat row: K1, K2, K3 (middle/aisle), K4, K5
+                    rowSeats.map((seat) => renderSeatButton(seat))
+                  ) : (
+                    // Standard 4-seat row: Col 1 & 2, AISLE, Col 3 & 4
+                    <>
+                      {/* Left 2 seats (Col 1 & Col 2) */}
+                      {rowSeats.slice(0, 2).map((seat) => renderSeatButton(seat))}
 
-                {/* AISLE Middle Gap */}
-                <div className="text-[10px] text-slate-600 font-black uppercase tracking-widest text-center select-none">
-                  AISLE
+                      {/* AISLE Middle Gap */}
+                      <div className="text-[10px] text-slate-600 font-black uppercase tracking-widest text-center select-none">
+                        AISLE
+                      </div>
+
+                      {/* Right 2 seats (Col 3 & Col 4) */}
+                      {rowSeats.slice(2, 4).map((seat) => renderSeatButton(seat))}
+                    </>
+                  )}
                 </div>
-
-                {/* Right 2 seats (Col 3 & Col 4) */}
-                {rowSeats.slice(2, 4).map((seat) => renderSeatButton(seat))}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -604,23 +683,11 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
             {/* Modal Armchair Icon & Title */}
             <div className="flex flex-col items-center space-y-2">
               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
-                (() => {
-                  const colNum = parseInt(selectedSeat.id.substring(1), 10);
-                  return !isAdminOrSuper && currentUser?.gender && (
-                    ((colNum === 1 || colNum === 2) && currentUser.gender === 'male') ||
-                    ((colNum === 3 || colNum === 4) && currentUser.gender === 'female')
-                  );
-                })() && selectedSeat.status !== 'booked'
+                isSeatRestrictedForUser(selectedSeat.id) && selectedSeat.status !== 'booked'
                   ? 'bg-rose-500/20 border border-rose-500/30 text-rose-400'
                   : 'bg-indigo-600/20 border border-indigo-500/30 text-indigo-400'
               }`}>
-                {(() => {
-                  const colNum = parseInt(selectedSeat.id.substring(1), 10);
-                  return !isAdminOrSuper && currentUser?.gender && (
-                    ((colNum === 1 || colNum === 2) && currentUser.gender === 'male') ||
-                    ((colNum === 3 || colNum === 4) && currentUser.gender === 'female')
-                  );
-                })() && selectedSeat.status !== 'booked' ? (
+                {isSeatRestrictedForUser(selectedSeat.id) && selectedSeat.status !== 'booked' ? (
                   <Lock className="w-6 h-6" />
                 ) : (
                   <Armchair className="w-6 h-6" />
@@ -636,13 +703,7 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
               <span className="text-slate-400 font-medium">Status:</span>
               <span
                 className={`px-3 py-1 rounded-xl font-black uppercase tracking-wider text-[11px] ${
-                  (() => {
-                    const colNum = parseInt(selectedSeat.id.substring(1), 10);
-                    return !isAdminOrSuper && currentUser?.gender && (
-                      ((colNum === 1 || colNum === 2) && currentUser.gender === 'male') ||
-                      ((colNum === 3 || colNum === 4) && currentUser.gender === 'female')
-                    );
-                  })() && selectedSeat.status !== 'booked'
+                  isSeatRestrictedForUser(selectedSeat.id) && selectedSeat.status !== 'booked'
                     ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                     : selectedSeat.status === 'available'
                     ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
@@ -655,13 +716,7 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
                     : 'bg-slate-800 text-slate-400 border border-slate-700'
                 }`}
               >
-                {(() => {
-                  const colNum = parseInt(selectedSeat.id.substring(1), 10);
-                  return !isAdminOrSuper && currentUser?.gender && (
-                    ((colNum === 1 || colNum === 2) && currentUser.gender === 'male') ||
-                    ((colNum === 3 || colNum === 4) && currentUser.gender === 'female')
-                  );
-                })() && selectedSeat.status !== 'booked'
+                {isSeatRestrictedForUser(selectedSeat.id) && selectedSeat.status !== 'booked'
                   ? 'LOCKED'
                   : selectedSeat.status === 'available'
                   ? 'AVAILABLE'
@@ -675,13 +730,7 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
               </span>
             </div>
 
-            {(() => {
-              const colNum = parseInt(selectedSeat.id.substring(1), 10);
-              return !isAdminOrSuper && currentUser?.gender && (
-                ((colNum === 1 || colNum === 2) && currentUser.gender === 'male') ||
-                ((colNum === 3 || colNum === 4) && currentUser.gender === 'female')
-              );
-            })() && selectedSeat.status !== 'booked' && (
+            {isSeatRestrictedForUser(selectedSeat.id) && selectedSeat.status !== 'booked' && (
               <div className="p-3 rounded-2xl bg-rose-950/80 border border-rose-800 text-rose-300 text-xs font-bold text-center">
                 <Lock className="w-4 h-4 inline-block mr-2" />
                 এই সাইডটি আপনার জন্য লক করা আছে।
@@ -718,17 +767,40 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
               </div>
             )}
 
-            {/* Booking Form Inputs (When seat is available or modifying) */}
-            {selectedSeat.status !== 'locked' && !(() => {
-              const colNum = parseInt(selectedSeat.id.substring(1), 10);
-              return !isAdminOrSuper && currentUser?.gender && (
-                ((colNum === 1 || colNum === 2) && currentUser.gender === 'male') ||
-                ((colNum === 3 || colNum === 4) && currentUser.gender === 'female')
-              );
-            })() && (
+            {/* PUBLIC VIEW-ONLY INFORMATION (FOR NON-ADMIN USERS) */}
+            {!isAdminOrSuper && (
+              <div className="space-y-3 text-left pt-2 border-t border-slate-800">
+                {selectedSeat.status === 'booked' ? (
+                  <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 text-slate-300 text-xs space-y-2">
+                    <div className="flex items-center gap-2 text-amber-400 font-bold">
+                      <Lock className="w-4 h-4" />
+                      <span>শুধুমাত্র এডমিন এডিট করতে পারবেন</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      সিট পরিবর্তন, অন্য কারো নামে বরাদ্দ বা বাতিল করতে চাইলে অনুগ্রহ করে এডমিন বা সুপার এডমিন হিসেবে লগইন করুন।
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 text-slate-300 text-xs space-y-2 text-center">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
+                      <Armchair className="w-5 h-5" />
+                    </div>
+                    <h5 className="font-extrabold text-white text-sm">
+                      {selectedSeat.status === 'available' ? 'সিট ফাঁকা রয়েছে' : selectedSeat.status === 'male_only' ? 'শুধু ছাত্রদের সিট' : selectedSeat.status === 'female_only' ? 'শুধু ছাত্রীদের সিট' : 'লক করা সিট'}
+                    </h5>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      এই সিটটি বুকিং বা বরাদ্দ দিতে এডমিন বা সুপার এডমিন লগইন প্রয়োজন।
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Booking Form Inputs (ONLY FOR ADMIN OR SUPER ADMIN) */}
+            {isAdminOrSuper && (
               <div className="space-y-3 text-left pt-2 border-t border-slate-800">
                 <p className="text-xs font-bold text-white">
-                  {selectedSeat.status === 'booked' ? 'বুকিং এর তথ্য পরিবর্তন করুন:' : 'বুকিং শিক্ষার্থীর তথ্য:'}
+                  {selectedSeat.status === 'booked' ? 'বুকিং এর তথ্য পরিবর্তন করুন (Admin Edit):' : 'বুকিং শিক্ষার্থীর তথ্য (Admin Entry):'}
                 </p>
 
                 {/* Name */}
@@ -785,42 +857,27 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      disabled={!!currentUser?.gender && currentUser.role !== 'admin' && currentUser.role !== 'superadmin'}
                       onClick={() => setBookingGender('male')}
                       className={`flex-1 py-1.5 rounded-xl text-xs font-bold border transition-all ${
                         bookingGender === 'male'
                           ? 'bg-sky-600 border-sky-500 text-white'
                           : 'bg-slate-950 border-slate-800 text-slate-400'
-                      } ${
-                        !!currentUser?.gender && currentUser.role !== 'admin' && currentUser.role !== 'superadmin'
-                          ? 'opacity-70 cursor-not-allowed'
-                          : ''
                       }`}
                     >
                       Male (ছাত্র)
                     </button>
                     <button
                       type="button"
-                      disabled={!!currentUser?.gender && currentUser.role !== 'admin' && currentUser.role !== 'superadmin'}
                       onClick={() => setBookingGender('female')}
                       className={`flex-1 py-1.5 rounded-xl text-xs font-bold border transition-all ${
                         bookingGender === 'female'
                           ? 'bg-fuchsia-600 border-fuchsia-500 text-white'
                           : 'bg-slate-950 border-slate-800 text-slate-400'
-                      } ${
-                        !!currentUser?.gender && currentUser.role !== 'admin' && currentUser.role !== 'superadmin'
-                          ? 'opacity-70 cursor-not-allowed'
-                          : ''
                       }`}
                     >
                       Female ( ছাত্রী)
                     </button>
                   </div>
-                  {currentUser?.gender && currentUser.role !== 'admin' && currentUser.role !== 'superadmin' && (
-                    <span className="text-[10px] text-indigo-400 mt-1 block">
-                      * আপনার প্রোফাইলের জেন্ডার অনুযায়ী এটি নির্ধারিত (Locked to profile gender)
-                    </span>
-                  )}
                 </div>
               </div>
             )}
@@ -874,13 +931,21 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
                 Close
               </button>
 
-              {selectedSeat.status !== 'locked' && !(() => {
-                const colNum = parseInt(selectedSeat.id.substring(1), 10);
-                return !isAdminOrSuper && currentUser?.gender && (
-                  ((colNum === 1 || colNum === 2) && currentUser.gender === 'male') ||
-                  ((colNum === 3 || colNum === 4) && currentUser.gender === 'female')
-                );
-              })() && (
+              {!isAdminOrSuper && onOpenAdminLogin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSeatModalOpen(false);
+                    onOpenAdminLogin();
+                  }}
+                  className="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all cursor-pointer shadow-lg shadow-amber-500/20 flex items-center justify-center gap-1.5"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Admin Login</span>
+                </button>
+              )}
+
+              {isAdminOrSuper && (
                 <button
                   type="button"
                   onClick={handleBookSeat}
@@ -1040,12 +1105,7 @@ export const BusesView: React.FC<BusesViewProps> = ({ currentUser, batchmates })
     const isLocked = seat.status === 'locked';
 
     // side restriction check
-    const colNum = parseInt(seat.id.substring(1), 10);
-    const userGender = currentUser?.gender;
-    const isRestrictedSide = !isAdminOrSuper && userGender && (
-      ((colNum === 1 || colNum === 2) && userGender === 'male') ||
-      ((colNum === 3 || colNum === 4) && userGender === 'female')
-    );
+    const isRestrictedSide = isSeatRestrictedForUser(seat.id);
 
     // Find student photo for booked seat
     let studentPhoto = seat.bookedPhotoUrl || '';

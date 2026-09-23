@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Batchmate, AppUser } from '../types';
-import { Users, Award, Phone, Quote, Plus, Search, User, X, Check, Lock, ShieldAlert, Edit, Trash2 } from 'lucide-react';
+import { Batchmate, AppUser, BusPackage } from '../types';
+import { Users, Award, Phone, Quote, Plus, Search, User, X, Check, Lock, ShieldAlert, Edit, Trash2, GraduationCap, MapPin, ChevronRight, ShieldCheck, Bus } from 'lucide-react';
 import { UserSession } from './AuthScreen';
 import { subscribeUsers, disableUserInFirestore } from '../firebase';
 
@@ -10,6 +10,7 @@ interface BatchmateDirectoryProps {
   onUpdateBatchmate?: (id: string, updates: Partial<Batchmate>) => void;
   onDeleteBatchmate?: (id: string) => void;
   currentUser?: UserSession | null;
+  buses: BusPackage[];
 }
 
 export const BatchmateDirectory: React.FC<BatchmateDirectoryProps> = ({
@@ -17,7 +18,8 @@ export const BatchmateDirectory: React.FC<BatchmateDirectoryProps> = ({
   onAddBatchmate,
   onUpdateBatchmate,
   onDeleteBatchmate,
-  currentUser
+  currentUser,
+  buses
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -37,19 +39,14 @@ export const BatchmateDirectory: React.FC<BatchmateDirectoryProps> = ({
   const [name, setName] = useState('');
   const [nickName, setNickName] = useState('');
   const [rollNo, setRollNo] = useState('');
-  const [section, setSection] = useState('A');
-  const [quote, setQuote] = useState('');
-  const [photoUrl, setPhotoUrl] = useState('');
-  const [favoriteMemory, setFavoriteMemory] = useState('');
+  const [section, setSection] = useState('BA');
   const [phone, setPhone] = useState('');
-  const [awardsText, setAwardsText] = useState('ট্যুর ফেলো 🌟');
 
   const filteredBatchmates = batchmates.filter(
     (b) =>
       (b.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
       (b.nickName?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-      (b.rollNo?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-      (b.quote?.toLowerCase() || '').includes(searchQuery.toLowerCase())
+      (b.rollNo?.toLowerCase() || '').includes(searchQuery.toLowerCase())
   );
 
   const openAddModal = () => {
@@ -58,12 +55,8 @@ export const BatchmateDirectory: React.FC<BatchmateDirectoryProps> = ({
     setName('');
     setNickName('');
     setRollNo('');
-    setSection('A');
-    setQuote('');
-    setPhotoUrl('');
-    setFavoriteMemory('');
+    setSection('BA');
     setPhone('');
-    setAwardsText('ট্যুর ফেলো 🌟');
     setIsModalOpen(true);
   };
 
@@ -73,12 +66,8 @@ export const BatchmateDirectory: React.FC<BatchmateDirectoryProps> = ({
     setName(b.name);
     setNickName(b.nickName);
     setRollNo(b.rollNo);
-    setSection(b.section || 'A');
-    setQuote(b.quote || '');
-    setPhotoUrl(b.photoUrl);
-    setFavoriteMemory(b.favoriteMemory || '');
+    setSection(b.section || 'BA');
     setPhone(b.phone || '');
-    setAwardsText(b.awards ? b.awards.join(', ') : 'ট্যুর ফেলো 🌟');
     setIsModalOpen(true);
   };
 
@@ -86,25 +75,17 @@ export const BatchmateDirectory: React.FC<BatchmateDirectoryProps> = ({
     e.preventDefault();
     if (!name.trim() || !rollNo.trim()) return;
 
-    const defaultPhoto = photoUrl.trim()
-      ? photoUrl.trim()
-      : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
-
-    const awardsList = awardsText
-      .split(',')
-      .map((a) => a.trim())
-      .filter(Boolean);
-
     const payload = {
       name: name.trim(),
       nickName: nickName.trim() || name.trim(),
       rollNo: rollNo.trim(),
-      section: section || 'A',
-      quote: quote.trim() || 'Degree Tour 3.0 was unforgettable!',
-      photoUrl: defaultPhoto,
-      favoriteMemory: favoriteMemory.trim() || 'সাজেক ভ্যালি নাইট',
+      section: section || 'BA',
       phone: phone.trim(),
-      awards: awardsList.length > 0 ? awardsList : ['ট্যুর ফেলো 🌟']
+      // Maintain old fields for existing data but set defaults for new
+      quote: isEditMode && editingId ? (batchmates.find(b => b.id === editingId)?.quote || '') : '',
+      photoUrl: isEditMode && editingId ? (batchmates.find(b => b.id === editingId)?.photoUrl || '') : '',
+      favoriteMemory: isEditMode && editingId ? (batchmates.find(b => b.id === editingId)?.favoriteMemory || '') : '',
+      awards: isEditMode && editingId ? (batchmates.find(b => b.id === editingId)?.awards || []) : []
     };
 
     if (isEditMode && editingId) {
@@ -119,13 +100,27 @@ export const BatchmateDirectory: React.FC<BatchmateDirectoryProps> = ({
     setName('');
     setNickName('');
     setRollNo('');
-    setQuote('');
-    setPhotoUrl('');
-    setFavoriteMemory('');
     setPhone('');
     setIsModalOpen(false);
     setIsEditMode(false);
     setEditingId('');
+  };
+
+  const getStudentBusSeat = (studentRoll: string) => {
+    for (const bus of buses) {
+      const seats = (bus.seats || {}) as Record<string, any>;
+      const seatEntry = Object.entries(seats).find(([_, seat]: [string, any]) => {
+        const student = batchmates.find(b => b.rollNo === studentRoll);
+        return (
+          seat.bookedBy?.toLowerCase() === student?.name?.toLowerCase() ||
+          seat.bookedPhone === student?.phone
+        );
+      });
+      if (seatEntry) {
+        return { busName: bus.name, seatNo: seatEntry[0] };
+      }
+    }
+    return null;
   };
 
   const handleDelete = (id: string, sName: string) => {
@@ -169,7 +164,7 @@ export const BatchmateDirectory: React.FC<BatchmateDirectoryProps> = ({
               <span>স্টুডেন্ট ডিটেইলস (Student Details)</span>
             </h2>
             <p className="text-xs text-slate-400 mt-1">
-              ডিগ্রী ট্যুর ৩.০ এর সহযাত্রী স্টুডেন্টদের পরিচিতি ডায়েরি। কার্ডে ক্লিক করে ডিটেইলস দেখুন।
+              ডিগ্রী ট্যুর ৩.০ এর সহযাত্রী স্টুডেন্টদের পরিচিতি ডায়েরি। রো-তে ক্লিক করে ডিটেইলস দেখুন।
             </p>
           </div>
 
@@ -197,107 +192,89 @@ export const BatchmateDirectory: React.FC<BatchmateDirectoryProps> = ({
         </div>
       </div>
 
-      {/* Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredBatchmates.map((b) => {
+      {/* List View (Google Sheet Style) */}
+      <div className="space-y-2">
+        {filteredBatchmates.map((b, index) => {
           if (!b || !b.id) return null;
-          const appUser = appUsers.find(u => u.rollNo === b.rollNo);
-          const finalPhotoUrl = appUser?.avatarUrl || b.photoUrl;
           return (
             <div
               key={b.id}
               onClick={() => setSelectedStudent(b)}
-              className="rounded-3xl bg-slate-900/90 border border-slate-800 hover:border-sky-500/50 p-5 space-y-4 transition-all shadow-xl flex flex-col justify-between group cursor-pointer hover:shadow-sky-500/5 hover:-translate-y-0.5"
+              className="group flex flex-col md:flex-row md:items-center gap-4 p-3 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-sky-500/50 transition-all cursor-pointer hover:bg-slate-800/60"
             >
-              <div className="space-y-4">
-                {/* Profile Header */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-3">
-                    <div className="relative w-16 h-16 rounded-2xl overflow-hidden bg-slate-950 border-2 border-sky-500/30 group-hover:border-sky-400 transition-colors flex-shrink-0">
-                      <img
-                        src={finalPhotoUrl}
-                        alt={b.name}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-base text-white leading-tight group-hover:text-sky-300 transition-colors">{b.name}</h3>
-                      <p className="text-xs text-sky-400 font-semibold">ডাকনাম: "{b.nickName}"</p>
-                      <p className="text-[11px] text-slate-400">রোল: {b.rollNo} (Section {b.section || 'A'})</p>
-                    </div>
+              <div className="flex items-center gap-4 flex-grow">
+                {/* Serial & Icon */}
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 text-sky-400 font-black text-xs border border-slate-700">
+                    {index + 1}
+                  </span>
+                  <div className="relative w-12 h-12 rounded-xl bg-slate-950 border-2 border-sky-500/30 group-hover:border-sky-400 transition-colors flex-shrink-0 flex items-center justify-center text-slate-500">
+                    <User className="w-6 h-6" />
                   </div>
-
-                  {/* Admin Actions directly on card */}
-                  {isAdminOrSuper && (
-                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => openEditModal(b)}
-                        className="p-2 bg-slate-800 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-lg transition-colors"
-                        title="সম্পাদনা করুন"
-                      >
-                        <Edit className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(b.id, b.name)}
-                        className="p-2 bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white rounded-lg transition-colors"
-                        title="মুছে ফেলুন"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
                 </div>
 
-                {/* Award Badges */}
-                {b.awards && b.awards.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {b.awards.map((award, i) => (
-                      <span
-                        key={i}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px] font-bold"
-                      >
-                        <Award className="w-3 h-3 text-amber-400" />
-                        {award}
+                {/* Main Info */}
+                <div className="min-w-0 flex-grow grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4 items-center">
+                  <div>
+                    <h3 className="font-bold text-sm text-white truncate group-hover:text-sky-300 transition-colors">{b.name}</h3>
+                    <p className="text-[10px] text-sky-400 font-semibold truncate">ডাকনাম: "{b.nickName}"</p>
+                  </div>
+                  
+                  <div className="text-[11px] text-slate-400">
+                    <div className="flex items-center gap-1.5">
+                      <GraduationCap className="w-3.5 h-3.5 text-slate-500" />
+                      <span>রোল: {b.rollNo}</span>
+                      <span className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 font-bold border border-sky-500/20 text-[9px]">
+                        {b.section || 'BA'}
                       </span>
-                    ))}
+                    </div>
                   </div>
-                )}
 
-                {/* Quote */}
-                <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/50 text-xs text-slate-300 italic flex gap-2">
-                  <Quote className="w-4 h-4 text-sky-400 flex-shrink-0 mt-0.5" />
-                  <span className="line-clamp-2">"{b.quote}"</span>
+                  <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                    <Phone className="w-3.5 h-3.5 text-slate-500" />
+                    <span>{b.phone || 'N/A'}</span>
+                  </div>
                 </div>
-
-                {/* Favorite Memory */}
-                {b.favoriteMemory && (
-                  <div className="text-xs text-slate-400">
-                    <strong className="text-slate-200">সেরা স্মৃতি:</strong> {b.favoriteMemory}
-                  </div>
-                )}
               </div>
 
-              {/* Footer Contact */}
-              {b.phone && (
-                <div className="pt-3 border-t border-slate-800 text-xs text-slate-400 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-slate-300">
-                    <Phone className="w-3.5 h-3.5 text-emerald-400" />
-                    {b.phone}
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-medium group-hover:text-sky-400 transition-colors">
-                    Click to view full details →
-                  </span>
-                </div>
-              )}
+              {/* Actions */}
+              <div className="flex items-center justify-between md:justify-end gap-3 pt-2 md:pt-0 border-t md:border-t-0 border-slate-800/50">
+                {getStudentBusSeat(b.rollNo) && (
+                  <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-800/50 text-[10px] text-slate-500">
+                    <Bus className="w-3 h-3 text-sky-500" />
+                    {getStudentBusSeat(b.rollNo)?.seatNo}
+                  </div>
+                )}
+
+                {isAdminOrSuper && (
+                  <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => openEditModal(b)}
+                      className="p-2 bg-slate-800 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-lg transition-colors"
+                      title="সম্পাদনা করুন"
+                    >
+                      <Edit className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(b.id, b.name)}
+                      className="p-2 bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white rounded-lg transition-colors"
+                      title="মুছে ফেলুন"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+                <ChevronRight className="w-4 h-4 text-slate-700 group-hover:text-sky-500 transition-colors hidden md:block" />
+              </div>
             </div>
           );
         })}
       </div>
 
-      {/* 1-Click Student Details Viewer Modal */}
+      {/* Student Details Viewer Modal */}
       {selectedStudent && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-6 space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-6 space-y-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setSelectedStudent(null)}
               className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-full bg-slate-800/80 transition-colors"
@@ -306,90 +283,81 @@ export const BatchmateDirectory: React.FC<BatchmateDirectoryProps> = ({
             </button>
 
             {/* Profile Info Layout */}
-            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 pt-2 text-center sm:text-left">
-              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden bg-slate-950 border-2 border-sky-500/40 shrink-0">
-                <img
-                  src={appUsers.find(u => u.rollNo === selectedStudent.rollNo)?.avatarUrl || selectedStudent.photoUrl}
-                  alt={selectedStudent.name}
-                  className="w-full h-full object-cover"
-                />
+            <div className="flex flex-col items-center gap-4 pt-2 text-center">
+              <div className="w-24 h-24 rounded-full bg-slate-950 border-4 border-sky-500/30 shrink-0 shadow-lg shadow-sky-500/10 flex items-center justify-center text-slate-500">
+                <User className="w-12 h-12" />
               </div>
 
-              <div className="space-y-2 flex-1">
-                <h3 className="text-xl sm:text-2xl font-black text-white">{selectedStudent.name}</h3>
-                <p className="text-sm text-sky-400 font-bold">ডাকনাম: "{selectedStudent.nickName}"</p>
-                
-                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 text-xs">
-                  <span className="px-3 py-1 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 font-semibold">
-                    রোল: {selectedStudent.rollNo}
-                  </span>
-                  <span className="px-3 py-1 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 font-semibold">
-                    সেকশন: {selectedStudent.section || 'A'}
-                  </span>
+              <div className="space-y-1">
+                <h3 className="text-2xl font-black text-white">{selectedStudent.name}</h3>
+                <p className="text-sm text-sky-400 font-bold tracking-wide">ডাকনাম: "{selectedStudent.nickName}"</p>
+              </div>
+            </div>
+
+            {/* Info Grid */}
+            <div className="grid grid-cols-1 gap-3">
+              <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-950/50 border border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                    <GraduationCap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest">রোল নম্বর</p>
+                    <p className="text-sm text-white font-bold">{selectedStudent.rollNo}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest">গ্রুপ (Group)</p>
+                  <p className="text-sm text-sky-400 font-bold">{selectedStudent.section || 'BA'}</p>
                 </div>
               </div>
-            </div>
 
-            {/* Quote Box */}
-            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 text-sm text-slate-300 italic flex gap-3">
-              <Quote className="w-5 h-5 text-sky-400 shrink-0 mt-0.5" />
-              <span>"{selectedStudent.quote || 'Degree Tour 3.0 memories forever!'}"</span>
-            </div>
-
-            {/* Detailed Metadata Grid */}
-            <div className="space-y-4 pt-2">
-              {/* Awards */}
-              {selectedStudent.awards && selectedStudent.awards.length > 0 && (
-                <div className="space-y-1.5">
-                  <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block">ব্যাচ অ্যাওয়ার্ডস</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedStudent.awards.map((award, i) => (
-                      <span
-                        key={i}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-300 border border-amber-500/20 text-xs font-bold"
-                      >
-                        <Award className="w-3.5 h-3.5 text-amber-400" />
-                        {award}
-                      </span>
-                    ))}
+              {getStudentBusSeat(selectedStudent.rollNo) && (
+                <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-950/50 border border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-sky-500/10 flex items-center justify-center text-sky-400">
+                      <Bus className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest">বাস ও সিট</p>
+                      <p className="text-sm text-white font-bold">
+                        {`${getStudentBusSeat(selectedStudent.rollNo)?.busName} - Seat ${getStudentBusSeat(selectedStudent.rollNo)?.seatNo}`}
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* Best Memory */}
-              {selectedStudent.favoriteMemory && (
-                <div className="space-y-1.5">
-                  <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block">ট্যুরের সেরা স্মৃতি</span>
-                  <p className="text-sm text-slate-300 bg-slate-950/40 p-3 rounded-2xl border border-slate-800/60 font-medium">
-                    ✨ {selectedStudent.favoriteMemory}
-                  </p>
+              <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-950/50 border border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+                    <Phone className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest">ফোন নম্বর</p>
+                    <p className="text-sm text-emerald-400 font-bold">{selectedStudent.phone || 'N/A'}</p>
+                  </div>
                 </div>
-              )}
-
-              {/* Phone */}
-              {selectedStudent.phone && (
-                <div className="space-y-1.5">
-                  <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block">যোগাযোগ নম্বর</span>
-                  <a
-                    href={`tel:${selectedStudent.phone}`}
-                    className="inline-flex items-center gap-2 text-sm text-emerald-400 bg-emerald-950/20 px-4 py-2 rounded-2xl border border-emerald-500/20 hover:bg-emerald-950/40 transition-colors"
-                  >
-                    <Phone className="w-4 h-4 text-emerald-400" />
-                    <span className="font-semibold">{selectedStudent.phone}</span>
-                  </a>
-                </div>
-              )}
+                {selectedStudent.phone && (
+                   <a
+                     href={`tel:${selectedStudent.phone}`}
+                     className="p-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white transition-colors shadow-lg shadow-emerald-500/20"
+                   >
+                     <Phone className="w-3.5 h-3.5" />
+                   </a>
+                )}
+              </div>
             </div>
 
-            {/* Admin Buttons Inside View Modal */}
+            {/* Admin Action Buttons */}
             {isAdminOrSuper && (
-              <div className="pt-4 border-t border-slate-800 flex flex-wrap gap-2 justify-end">
+              <div className="pt-2 flex gap-3">
                 <button
                   onClick={() => {
                     setSelectedStudent(null);
                     openEditModal(selectedStudent);
                   }}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
+                  className="flex-1 py-3 bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all border border-slate-700"
                 >
                   <Edit className="w-4 h-4" />
                   <span>তথ্য সংশোধন (Edit)</span>
@@ -401,7 +369,7 @@ export const BatchmateDirectory: React.FC<BatchmateDirectoryProps> = ({
                     setSelectedStudent(null);
                     handleDelete(idToDelete, nameToDelete);
                   }}
-                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
+                  className="flex-1 py-3 bg-rose-950/30 hover:bg-rose-600 text-rose-500 hover:text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all border border-rose-500/20"
                 >
                   <Trash2 className="w-4 h-4" />
                   <span>মুছে ফেলুন (Delete)</span>
@@ -415,123 +383,94 @@ export const BatchmateDirectory: React.FC<BatchmateDirectoryProps> = ({
       {/* Add & Edit Batchmate Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-5 shadow-2xl relative">
             <button
               onClick={() => setIsModalOpen(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-full bg-slate-800/80 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Users className="w-5 h-5 text-sky-400" />
+            <h3 className="text-xl font-black text-white flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-sky-500/10 flex items-center justify-center text-sky-400">
+                <Edit className="w-5 h-5" />
+              </div>
               <span>{isEditMode ? 'স্টুডেন্ট তথ্য সংশোধন করুন' : 'নতুন স্টুডেন্ট নিবন্ধন করুন'}</span>
             </h3>
 
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <div>
-                <label className="text-xs font-semibold text-slate-300">সম্পূর্ণ নাম *</label>
+            <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest ml-1">সম্পূর্ণ নাম *</label>
                 <input
                   type="text"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="যেমন: তানভীর আহমেদ"
-                  className="w-full mt-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500"
+                  className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-sky-500 transition-all"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-slate-300">ডাকনাম</label>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest ml-1">ডাকনাম</label>
                   <input
                     type="text"
                     value={nickName}
                     onChange={(e) => setNickName(e.target.value)}
-                    placeholder="যেমন: তুহিন"
-                    className="w-full mt-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500"
+                    placeholder="ডাকনাম"
+                    className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-sky-500 transition-all"
                   />
                 </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-300">রোল নম্বর *</label>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest ml-1">রোল নম্বর *</label>
                   <input
                     type="text"
                     required
                     value={rollNo}
                     onChange={(e) => setRollNo(e.target.value)}
-                    placeholder="যেমন: DEG-88-012"
-                    className="w-full mt-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500"
+                    placeholder="যেমন: 101"
+                    className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-sky-500 transition-all"
                   />
                 </div>
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-slate-300">ছবি সংযোগ (Photo URL)</label>
-                <input
-                  type="text"
-                  value={photoUrl}
-                  onChange={(e) => setPhotoUrl(e.target.value)}
-                  placeholder="https://images.unsplash.com/..."
-                  className="w-full mt-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-300">ট্যুর উক্তি / বাণী (Tour Quote)</label>
-                <textarea
-                  rows={2}
-                  value={quote}
-                  onChange={(e) => setQuote(e.target.value)}
-                  placeholder="আপনার প্রিয় কোনো ট্যুর উক্তি..."
-                  className="w-full mt-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-300">ব্যাচ অ্যাওয়ার্ডস (কমা দিয়ে লিখুন)</label>
-                <input
-                  type="text"
-                  value={awardsText}
-                  onChange={(e) => setAwardsText(e.target.value)}
-                  placeholder="যেমন: ডিজে অফ দ্যা ট্যুর 🎶, ফটো মাস্টার 📸"
-                  className="w-full mt-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-slate-300">ফোন নম্বর</label>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                   <label className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest ml-1">গ্রুপ (Group) *</label>
+                   <select
+                     value={section}
+                     onChange={(e) => setSection(e.target.value)}
+                     className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-sky-500 transition-all appearance-none cursor-pointer"
+                   >
+                     <option value="BA">BA</option>
+                     <option value="BBS">BBS</option>
+                     <option value="BSS">BSS</option>
+                   </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest ml-1">ফোন নম্বর</label>
                   <input
                     type="text"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="01711223344"
-                    className="w-full mt-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-300">সেরা স্মৃতি</label>
-                  <input
-                    type="text"
-                    value={favoriteMemory}
-                    onChange={(e) => setFavoriteMemory(e.target.value)}
-                    placeholder="যেমন: সাজেক বার্বিকিউ নাইট"
-                    className="w-full mt-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500"
+                    className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-sky-500 transition-all"
                   />
                 </div>
               </div>
 
-              <div className="pt-2 flex justify-end gap-2">
+              <div className="pt-4 flex gap-3">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 bg-slate-800 text-slate-300 text-xs font-semibold rounded-xl"
+                  className="flex-1 py-3 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl transition-all hover:bg-slate-700"
                 >
                   বাতিল
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs rounded-xl"
+                  className="flex-1 py-3 bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs rounded-xl shadow-lg shadow-sky-500/20 transition-all"
                 >
                   {isEditMode ? 'আপডেট করুন' : 'সংরক্ষণ করুন'}
                 </button>

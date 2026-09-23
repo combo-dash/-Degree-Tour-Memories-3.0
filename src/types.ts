@@ -55,6 +55,7 @@ export interface Batchmate {
   phone?: string;
   socialLink?: string;
   awards: string[];
+  createdAt?: number;
 }
 
 export interface TourSpot {
@@ -140,14 +141,6 @@ export interface FirebaseCustomConfig {
 }
 
 export type ViewTab = 
-  | 'dashboard'
-  | 'payment'
-  | 'students'
-  | 'tours'
   | 'buses'
-  | 'notices'
-  | 'gallery'
-  | 'chat'
   | 'admins'
-  | 'activityLogs'
   | 'settings';

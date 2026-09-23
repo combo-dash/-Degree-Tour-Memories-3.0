@@ -22,8 +22,16 @@ import {
   Phone
 } from 'lucide-react';
 import { getPublicAdminAvatar } from '../utils/adminAvatars';
-import { subscribeUsers, addUserToFirestore } from '../firebase';
-import { AppUser } from '../types';
+import {
+  subscribeUsers,
+  addUserToFirestore,
+  subscribeBatchmates,
+  getAllUsersDirectly,
+  resetUserPasswordInFirestore,
+  updateUserInFirestore,
+  addBatchmateToFirestore
+} from '../firebase';
+import { AppUser, Batchmate } from '../types';
 
 export interface UserSession {
   id: string;
@@ -61,10 +69,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   setTheme
 }) => {
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
+  const [batchmates, setBatchmates] = useState<Batchmate[]>([]);
 
   useEffect(() => {
-    const unsub = subscribeUsers(setAppUsers);
-    return () => unsub();
+    console.log('AuthScreen: Subscribing to users and batchmates...');
+    const unsub = subscribeUsers((users) => {
+      console.log(`AuthScreen: Received ${users.length} users from Firestore`);
+      setAppUsers(users);
+    });
+    const unsubBm = subscribeBatchmates((bm) => {
+      console.log(`AuthScreen: Received ${bm.length} batchmates from Firestore`);
+      setBatchmates(bm);
+    });
+    return () => {
+      unsub();
+      unsubBm();
+    };
   }, []);
 
   const [role, setRole] = useState<'student' | 'admin' | 'superadmin'>('student');
@@ -114,111 +134,180 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
   };
 
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!emailOrId || !password) {
+    const queryStr = emailOrId.trim().toLowerCase();
+    const passStr = password.trim();
+
+    if (!queryStr || !passStr) {
       setNotification(
         language === 'EN'
-          ? 'Please enter your email/ID and password'
-          : 'অনুগ্রহ করে ইমেইল/আইডি এবং পাসওয়ার্ড দিন'
+          ? 'Please enter your Class Roll and password'
+          : 'অনুগ্রহ করে ক্লাস রোল এবং পাসওয়ার্ড দিন'
       );
       return;
     }
 
     setIsLoading(true);
+    setNotification(null);
 
-    setTimeout(() => {
-      setIsLoading(false);
-      const queryStr = emailOrId.trim().toLowerCase();
-
-      // Check Super Admin default
-      if (role === 'superadmin') {
-        if ((queryStr === 'tanvirtuhin482@gmail.com' || queryStr === 'superadmin') && password === 'Tanvirtuhin88') {
-          const superAdminUser: UserSession = {
-            id: 'superadmin-1',
-            name: 'Tanvir Tuhin (Super Admin)',
-            email: 'tanvirtuhin482@gmail.com',
-            role: 'superadmin',
-            phone: '01711223344',
-            avatarUrl: getPublicAdminAvatar('superadmin', 'tanvirtuhin482@gmail.com', 'Tanvir Tuhin (Super Admin)') || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80'
-          };
-          onSignInSuccess(superAdminUser);
-          return;
-        } else {
-          setNotification(
-            language === 'EN'
-              ? 'Invalid Super Admin credentials!'
-              : 'সুপার এডমিন তথ্য সঠিক নয়!'
-          );
-          return;
-        }
-      }
-
-      // Check Admin default
-      if (role === 'admin') {
-        if ((queryStr === 'admin@degreetour.com' || queryStr === 'admin') && password === 'admin123') {
-          const adminUser: UserSession = {
-            id: 'admin-1',
-            name: 'Admin Officer',
-            email: 'admin@degreetour.com',
-            role: 'admin',
-            phone: '01812345678',
-            avatarUrl: getPublicAdminAvatar('admin', 'admin@degreetour.com', 'Admin Officer') || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80'
-          };
-          onSignInSuccess(adminUser);
-          return;
-        }
-      }
-
-      // Check registered users in Firestore
-      const foundUser = appUsers.find(
-        (u) =>
-          (u.email?.toLowerCase() === queryStr || u.rollNo?.toLowerCase() === queryStr || u.name?.toLowerCase() === queryStr) &&
-          u.password === password &&
-          u.role === role
-      );
-
-      if (foundUser) {
-        if (foundUser.disabled) {
-          setNotification(
-            language === 'EN'
-              ? 'Account is disabled! Please contact support.'
-              : 'আপনার অ্যাকাউন্টটি বন্ধ করে দেওয়া হয়েছে! অনুগ্রহ করে এডমিনের সাথে যোগাযোগ করুন।'
-          );
-          setIsLoading(false);
-          return;
-        }
-        onSignInSuccess({
-          id: foundUser.id,
-          name: foundUser.name,
-          email: foundUser.email,
-          role: foundUser.role,
-          phone: foundUser.phone,
-          rollNo: foundUser.rollNo,
-          degreeType: foundUser.degreeType,
-          session: foundUser.session,
-          status: foundUser.status,
-          bloodGroup: foundUser.bloodGroup,
-          avatarUrl: foundUser.avatarUrl,
-          gender: foundUser.gender
-        });
-      } else {
+    // 1. Check Super Admin default
+    if (role === 'superadmin' || queryStr === 'tanvirtuhin482@gmail.com' || queryStr === 'superadmin') {
+      if ((queryStr === 'tanvirtuhin482@gmail.com' || queryStr === 'superadmin') && passStr === 'Tanvirtuhin88') {
+        setIsLoading(false);
+        const superAdminUser: UserSession = {
+          id: 'superadmin-1',
+          name: 'Tanvir Tuhin (Super Admin)',
+          email: 'tanvirtuhin482@gmail.com',
+          role: 'superadmin',
+          phone: '01711223344',
+          avatarUrl: getPublicAdminAvatar('superadmin', 'tanvirtuhin482@gmail.com', 'Tanvir Tuhin (Super Admin)') || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80'
+        };
+        onSignInSuccess(superAdminUser);
+        return;
+      } else if (role === 'superadmin') {
+        setIsLoading(false);
         setNotification(
           language === 'EN'
-            ? 'Account not found or incorrect password! Please register first.'
-            : 'অ্যাকাউন্ট পাওয়া যায়নি বা পাসওয়ার্ড ভুল! অনুগ্রহ করে প্রথমে রেজিস্ট্রেশন করুন।'
+            ? 'Invalid Super Admin credentials!'
+            : 'সুপার এডমিন তথ্য সঠিক নয়!'
         );
+        return;
       }
-    }, 600);
+    }
+
+    // 2. Check registered users in Firestore (direct fetch + local state to avoid any subscription delay)
+    let allUsers = [...appUsers];
+    try {
+      const directUsers = await getAllUsersDirectly();
+      if (directUsers && directUsers.length > 0) {
+        allUsers = directUsers;
+      }
+    } catch (err) {
+      console.warn('Direct fetch failed, falling back to cached state:', err);
+    }
+
+    const matchedUser = allUsers.find(
+      (u) =>
+        String(u.rollNo || '').trim().toLowerCase() === queryStr ||
+        String(u.email || '').trim().toLowerCase() === queryStr ||
+        String(u.name || '').trim().toLowerCase() === queryStr
+    );
+
+    if (matchedUser) {
+      if (matchedUser.disabled) {
+        setIsLoading(false);
+        setNotification(
+          language === 'EN'
+            ? 'Account is disabled! Please contact support.'
+            : 'আপনার অ্যাকাউন্টটি বন্ধ করে দেওয়া হয়েছে! অনুগ্রহ করে এডমিনের সাথে যোগাযোগ করুন।'
+        );
+        return;
+      }
+
+      // If user has a password matching input, or if password was not set yet, or matched roll
+      const isPasswordCorrect =
+        matchedUser.password === passStr ||
+        (!matchedUser.password && passStr) ||
+        (matchedUser.rollNo && passStr === String(matchedUser.rollNo).trim());
+
+      if (isPasswordCorrect) {
+        // If they logged in and didn't have this password saved, update it
+        if (matchedUser.password !== passStr) {
+          updateUserInFirestore(matchedUser.id, { password: passStr });
+        }
+        setIsLoading(false);
+        onSignInSuccess({
+          id: matchedUser.id,
+          name: matchedUser.name,
+          email: matchedUser.email,
+          role: matchedUser.role || 'student',
+          phone: matchedUser.phone,
+          rollNo: matchedUser.rollNo,
+          degreeType: matchedUser.degreeType,
+          session: matchedUser.session,
+          status: matchedUser.status,
+          bloodGroup: matchedUser.bloodGroup,
+          avatarUrl: matchedUser.avatarUrl,
+          gender: matchedUser.gender
+        });
+        return;
+      } else {
+        setIsLoading(false);
+        setNotification(
+          language === 'EN'
+            ? 'Incorrect password! Please try again or click "Forgot Password".'
+            : 'পাসওয়ার্ডটি ভুল হয়েছে! আবার চেষ্টা করুন অথবা নিচের "পাসওয়ার্ড ভুলে গেছেন?" এ ক্লিক করে রিসেট করুন।'
+        );
+        return;
+      }
+    }
+
+    // 4. Check if student exists in batchmate directory (e.g. added by admin)
+    const matchedBatchmate = batchmates.find(
+      (b) =>
+        String(b.rollNo || '').trim().toLowerCase() === queryStr ||
+        String(b.name || '').trim().toLowerCase() === queryStr
+    );
+
+    if (matchedBatchmate) {
+      const cleanRoll = matchedBatchmate.rollNo.trim();
+      const userId = `user-${cleanRoll.toLowerCase().replace(/[^a-z0-9_-]/g, '_')}`;
+      // Automatically sync their user account with the password they provided!
+      const newStudentUser: AppUser = {
+        id: userId,
+        name: matchedBatchmate.name,
+        email: `${cleanRoll.toLowerCase()}@tour.com`,
+        rollNo: cleanRoll,
+        role: 'student',
+        phone: matchedBatchmate.phone && matchedBatchmate.phone !== 'N/A' ? matchedBatchmate.phone : '',
+        degreeType: 'BA',
+        session: '2021-2022',
+        status: 'Regular',
+        bloodGroup: 'O+',
+        gender: 'male',
+        password: passStr
+      };
+
+      try {
+        await addUserToFirestore(newStudentUser);
+        setIsLoading(false);
+        onSignInSuccess({
+          id: newStudentUser.id,
+          name: newStudentUser.name,
+          email: newStudentUser.email,
+          role: newStudentUser.role,
+          phone: newStudentUser.phone,
+          rollNo: newStudentUser.rollNo,
+          degreeType: newStudentUser.degreeType,
+          session: newStudentUser.session,
+          status: newStudentUser.status,
+          bloodGroup: newStudentUser.bloodGroup,
+          avatarUrl: newStudentUser.avatarUrl,
+          gender: newStudentUser.gender
+        });
+        return;
+      } catch (err) {
+        console.error('Failed to auto-register student on signin:', err);
+      }
+    }
+
+    // 5. If not found in users or batchmates
+    setIsLoading(false);
+    setNotification(
+      language === 'EN'
+        ? 'Account not found! Please click "Sign Up" below to create your account.'
+        : 'এই রোল নম্বরটি পাওয়া যায়নি! দয়া করে নিচে "সাইন আপ করুন" এ ক্লিক করে অ্যাকাউন্ট তৈরি করুন।'
+    );
   };
 
-  const handleSignUp = (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!signUpEmail || !fullName || !phoneNumber || !newPassword) {
+    if (!studentId || !fullName || !newPassword) {
       setNotification(
         language === 'EN'
-          ? 'Please fill in all required fields marked with *'
-          : 'অনুগ্রহ করে * চিহ্নিত সকল তথ্য প্রদান করুন'
+          ? 'Please fill in Name, Class Roll, and Password'
+          : 'অনুগ্রহ করে নাম, ক্লাস রোল এবং পাসওয়ার্ড প্রদান করুন'
       );
       return;
     }
@@ -233,66 +322,206 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
 
     setIsLoading(true);
+    setNotification(null);
 
-    setTimeout(() => {
-      setIsLoading(false);
-      const newUser = {
-        id: `user-${Date.now()}`,
-        name: fullName,
-        email: signUpEmail.trim().toLowerCase(),
-        rollNo: studentId || 'DEG-88-' + Math.floor(100 + Math.random() * 900),
-        role,
-        phone: phoneNumber,
-        degreeType,
-        session: sessionVal,
-        status: studentStatus,
-        bloodGroup,
-        gender,
-        address,
-        emergencyContact,
-        avatarUrl: avatarPreview || undefined,
-        password: newPassword
-      };
+    const sRoll = studentId.trim();
+    const sName = fullName.trim();
+    const sEmail = signUpEmail.trim().toLowerCase() || `${sRoll.toLowerCase()}@tour.com`;
+    const deterministicUserId = `user-${sRoll.toLowerCase().replace(/[^a-z0-9_-]/g, '_')}`;
 
-      const duplicate = appUsers.find(
-        (u) => u.email === newUser.email || u.rollNo === newUser.rollNo
-      );
+    // Check if user already exists in Firestore
+    let allUsers = [...appUsers];
+    try {
+      const directUsers = await getAllUsersDirectly();
+      if (directUsers && directUsers.length > 0) allUsers = directUsers;
+    } catch (e) {
+      // ignore
+    }
 
-      if (duplicate) {
-        setNotification(
-          language === 'EN'
-            ? 'An account with this Email or Student ID already exists! Please Sign In.'
-            : 'এই ইমেইল বা স্টুডেন্ট আইডি দিয়ে ইতোমধ্যে অ্যাকাউন্ট আছে! অনুগ্রহ করে সাইন ইন করুন।'
-        );
+    const existingUser = allUsers.find(
+      (u) =>
+        String(u.rollNo || '').trim().toLowerCase() === sRoll.toLowerCase() ||
+        String(u.email || '').toLowerCase() === sEmail
+    );
+
+    if (existingUser) {
+      // Update password & details for this student
+      try {
+        await updateUserInFirestore(existingUser.id, {
+          name: sName,
+          password: newPassword,
+          phone: phoneNumber || existingUser.phone || '',
+          avatarUrl: avatarPreview || existingUser.avatarUrl
+        });
+
+        // Also make sure batchmate directory entry has latest info
+        await addBatchmateToFirestore({
+          name: sName,
+          nickName: sName.split(' ')[0] || sName,
+          rollNo: sRoll,
+          section: degreeType || 'BA',
+          phone: phoneNumber || existingUser.phone || 'N/A',
+          quote: 'Degree Tour 3.0 memories!',
+          photoUrl: avatarPreview || existingUser.avatarUrl || '',
+          favoriteMemory: 'Degree Tour 3.0',
+          awards: ['ট্যুর মেম্বার 🌟']
+        });
+
+        setIsLoading(false);
+        onSignInSuccess({
+          ...existingUser,
+          name: sName,
+          avatarUrl: avatarPreview || existingUser.avatarUrl
+        });
         return;
+      } catch (err) {
+        console.error('Failed to update existing user on signup:', err);
       }
+    }
 
-      addUserToFirestore(newUser as AppUser);
+    const newUser: AppUser = {
+      id: deterministicUserId,
+      name: sName,
+      email: sEmail,
+      rollNo: sRoll,
+      role: 'student',
+      phone: phoneNumber || '',
+      degreeType: degreeType || 'BA',
+      session: sessionVal || '2021-2022',
+      status: studentStatus || 'Regular',
+      bloodGroup: bloodGroup || 'O+',
+      gender,
+      address: address || '',
+      emergencyContact: emergencyContact || '',
+      avatarUrl: avatarPreview || undefined,
+      password: newPassword
+    };
 
+    try {
+      await addUserToFirestore(newUser);
+
+      // Also ensure student is in batchmate directory without creating duplicate
+      await addBatchmateToFirestore({
+        name: sName,
+        nickName: sName.split(' ')[0] || sName,
+        rollNo: sRoll,
+        section: degreeType || 'BA',
+        phone: phoneNumber || 'N/A',
+        quote: 'Degree Tour 3.0 memories!',
+        photoUrl: avatarPreview || '',
+        favoriteMemory: 'Degree Tour 3.0',
+        awards: ['ট্যুর মেম্বার 🌟']
+      });
+
+      setIsLoading(false);
+      onSignInSuccess({
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+        phone: newUser.phone,
+        rollNo: newUser.rollNo,
+        degreeType: newUser.degreeType,
+        session: newUser.session,
+        status: newUser.status,
+        bloodGroup: newUser.bloodGroup,
+        avatarUrl: newUser.avatarUrl,
+        gender: newUser.gender
+      });
+    } catch (err) {
+      console.error('Registration failed:', err);
+      setIsLoading(false);
       setNotification(
         language === 'EN'
-          ? 'Registration successful! Please Sign In now.'
-          : 'রেজিস্ট্রেশন সফল হয়েছে! এখন সাইন ইন করুন।'
+          ? 'Registration failed! Please try again.'
+          : 'রেজিস্ট্রেশন ব্যর্থ হয়েছে! আবার চেষ্টা করুন।'
       );
-      setAuthMode('signin');
-    }, 700);
+    }
   };
 
-  const handleForgotPassword = (e: React.FormEvent) => {
+  const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!emailOrId) {
+    if (!emailOrId.trim()) {
       setNotification(
         language === 'EN'
-          ? 'Please enter your Email or Roll No / ID'
-          : 'অনুগ্রহ করে ইমেইল বা রোল নম্বর লিখুন'
+          ? 'Please enter your Class Roll'
+          : 'অনুগ্রহ করে আপনার ক্লাস রোল নম্বরটি লিখুন'
       );
       return;
     }
-    setNotification(
-      language === 'EN'
-        ? `Password reset link sent to ${emailOrId}!`
-        : `${emailOrId} ঠিকানায় পাসওয়ার্ড রিসেট লিংক পাঠানো হয়েছে!`
-    );
+
+    if (!newPassword.trim()) {
+      setNotification(
+        language === 'EN'
+          ? 'Please enter a new password'
+          : 'অনুগ্রহ করে নতুন পাসওয়ার্ড দিন'
+      );
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setNotification(
+        language === 'EN'
+          ? 'Passwords do not match!'
+          : 'পাসওয়ার্ড এবং কনফার্ম পাসওয়ার্ড মিলছে না!'
+      );
+      return;
+    }
+
+    setIsLoading(true);
+    setNotification(null);
+
+    const success = await resetUserPasswordInFirestore(emailOrId.trim(), newPassword.trim());
+    setIsLoading(false);
+
+    if (success) {
+      setNotification(
+        language === 'EN'
+          ? 'Password updated successfully! You can now Sign In.'
+          : 'পাসওয়ার্ড সফলভাবে পরিবর্তন করা হয়েছে! এখন লগইন করুন।'
+      );
+      setPassword(newPassword.trim());
+      setNewPassword('');
+      setConfirmPassword('');
+      setAuthMode('signin');
+    } else {
+      // If user wasn't in users collection, check if in batchmates
+      const existsInBm = batchmates.find(
+        (b) => String(b.rollNo || '').trim().toLowerCase() === emailOrId.trim().toLowerCase()
+      );
+      if (existsInBm) {
+        // Create user with this password
+        await addUserToFirestore({
+          id: `user-${Date.now()}`,
+          name: existsInBm.name,
+          email: `${existsInBm.rollNo.trim().toLowerCase()}@tour.com`,
+          rollNo: existsInBm.rollNo.trim(),
+          role: 'student',
+          phone: existsInBm.phone && existsInBm.phone !== 'N/A' ? existsInBm.phone : '',
+          degreeType: 'BA',
+          session: '2021-2022',
+          status: 'Regular',
+          bloodGroup: 'O+',
+          gender: 'male',
+          password: newPassword.trim()
+        });
+        setNotification(
+          language === 'EN'
+            ? 'Password set successfully! You can now Sign In.'
+            : 'পাসওয়ার্ড সফলভাবে সেট করা হয়েছে! এখন লগইন করুন।'
+        );
+        setPassword(newPassword.trim());
+        setNewPassword('');
+        setConfirmPassword('');
+        setAuthMode('signin');
+      } else {
+        setNotification(
+          language === 'EN'
+            ? 'Account not found for this Roll No! Please sign up.'
+            : 'এই রোল নম্বরের কোনো অ্যাকাউন্ট পাওয়া যায়নি! দয়া করে সাইন আপ করুন।'
+        );
+      }
+    }
   };
 
 
@@ -477,21 +706,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 </div>
               </div>
 
-              {/* Email / ID Input */}
+              {/* Class Roll Input */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-300 block">
-                  {language === 'EN' ? 'Email' : 'ইমেইল বা আইডি'}
+                  {language === 'EN' ? 'Class Roll' : 'ক্লাস রোল (Class Roll)'}
                 </label>
                 <div className="relative flex items-center">
                   <div className="absolute left-3.5 text-slate-400">
-                    <Mail className="w-4 h-4" />
+                    <GraduationCap className="w-4 h-4" />
                   </div>
                   <input
                     type="text"
                     required
                     value={emailOrId}
                     onChange={(e) => setEmailOrId(e.target.value)}
-                    placeholder={language === 'EN' ? 'you@example.com / Roll No / ID' : 'ইমেইল / রোল নং / আইডি'}
+                    placeholder={language === 'EN' ? 'Class Roll' : 'আপনার রোল নম্বর'}
                     className="w-full pl-10 pr-4 py-3 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
                   />
                 </div>
@@ -591,250 +820,90 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             </form>
           )}
 
-          {/* SIGN UP / STUDENT ACCOUNT CREATE FORM - MATCHING SCREENSHOTS EXACTLY */}
+          {/* SIGN UP / STUDENT ACCOUNT CREATE FORM - SIMPLIFIED */}
           {authMode === 'signup' && (
             <form onSubmit={handleSignUp} className="space-y-4">
               
-              {/* Profile Picture Uploader */}
-              <div className="flex flex-col items-center justify-center mb-2">
-                <label className="relative cursor-pointer group">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleAvatarChange}
-                    className="hidden"
-                  />
-                  <div className="w-20 h-20 rounded-full bg-indigo-600/90 hover:bg-indigo-500 border-2 border-indigo-400/50 flex items-center justify-center text-white shadow-xl shadow-indigo-600/30 transition-all overflow-hidden relative">
-                    {avatarPreview ? (
-                      <img
-                        src={avatarPreview}
-                        alt="Profile Preview"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <Camera className="w-9 h-9 text-white group-hover:scale-110 transition-transform" />
-                    )}
-                    <div className="absolute bottom-1 right-1 bg-blue-500 p-1.5 rounded-full border border-slate-900 shadow">
-                      <Upload className="w-3 h-3 text-white" />
-                    </div>
-                  </div>
-                </label>
-                <span className="text-xs font-semibold text-slate-300 mt-2">
-                  Profile Picture *
-                </span>
-              </div>
-
-              {/* Email * */}
+              {/* Full Name * */}
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-300 block">
-                  Email *
+                  Full Name (পূর্ণ নাম) *
                 </label>
                 <div className="relative flex items-center">
                   <div className="absolute left-3.5 text-slate-400">
-                    <Mail className="w-4 h-4" />
+                    <User className="w-4 h-4" />
                   </div>
                   <input
-                    type="email"
+                    type="text"
                     required
-                    value={signUpEmail}
-                    onChange={(e) => setSignUpEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="আপনার নাম লিখুন"
+                    className="w-full pl-10 pr-4 py-3 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                   />
                 </div>
               </div>
 
-              {/* Full Name * & Phone Number * (Grid) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300 block">
-                    Full Name *
-                  </label>
-                  <div className="relative flex items-center">
-                    <div className="absolute left-3.5 text-slate-400">
-                      <User className="w-4 h-4" />
-                    </div>
-                    <input
-                      type="text"
-                      required
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      placeholder="John Doe"
-                      className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                    />
+              {/* Class Roll / Student ID * */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-300 block">
+                  Class Roll (রোল নম্বর) *
+                </label>
+                <div className="relative flex items-center">
+                  <div className="absolute left-3.5 text-slate-400">
+                    <GraduationCap className="w-4 h-4" />
                   </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300 block">
-                    Phone Number *
-                  </label>
-                  <div className="relative flex items-center">
-                    <div className="absolute left-3.5 text-slate-400">
-                      <Phone className="w-4 h-4" />
-                    </div>
-                    <input
-                      type="tel"
-                      required
-                      value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value)}
-                      placeholder="01XXXXXXXXX"
-                      className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Degree Type * & Session * (Grid) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300 block">
-                    Degree Type *
-                  </label>
-                  <select
-                    value={degreeType}
-                    onChange={(e) => setDegreeType(e.target.value)}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="BA">BA</option>
-                    <option value="BSc">BSc</option>
-                    <option value="BSS">BSS</option>
-                    <option value="BBA">BBA</option>
-                    <option value="Degree Pass">Degree Pass</option>
-                    <option value="MA">MA</option>
-                    <option value="MSc">MSc</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300 block">
-                    Session *
-                  </label>
-                  <select
-                    value={sessionVal}
-                    onChange={(e) => setSessionVal(e.target.value)}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="2021-2022">2021-2022</option>
-                    <option value="2022-2023">2022-2023</option>
-                    <option value="2020-2021">2020-2021</option>
-                    <option value="2019-2020">2019-2020</option>
-                    <option value="2018-2019">2018-2019</option>
-                    <option value="1988-1989">1988-1989 (Batch '88)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Status * & Student ID * (Grid) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300 block">
-                    Status *
-                  </label>
-                  <select
-                    value={studentStatus}
-                    onChange={(e) => setStudentStatus(e.target.value)}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="Regular">Regular</option>
-                    <option value="Irregular">Irregular</option>
-                    <option value="Ex-Student">Ex-Student</option>
-                    <option value="Alumni">Alumni</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300 block">
-                    Student ID *
-                  </label>
                   <input
                     type="text"
                     required
                     value={studentId}
-                    onChange={(e) => setStudentId(e.target.value)}
-                    placeholder="CSE-042"
-                    className="w-full px-4 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    onChange={(e) => {
+                      setStudentId(e.target.value);
+                      // Auto-generate email based on roll for internal compatibility
+                      setSignUpEmail(e.target.value.toLowerCase() + "@tour.com");
+                    }}
+                    placeholder="আপনার রোল লিখুন"
+                    className="w-full pl-10 pr-4 py-3 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                   />
                 </div>
               </div>
 
-              {/* Blood Group & Gender (Grid) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300 block">
-                    Blood Group *
-                  </label>
-                  <select
-                    value={bloodGroup}
-                    onChange={(e) => setBloodGroup(e.target.value)}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="O+">O+</option>
-                    <option value="A+">A+</option>
-                    <option value="B+">B+</option>
-                    <option value="AB+">AB+</option>
-                    <option value="O-">O-</option>
-                    <option value="A-">A-</option>
-                    <option value="B-">B-</option>
-                    <option value="AB-">AB-</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300 block">
-                    Gender (জেন্ডার) *
-                  </label>
-                  <select
-                    value={gender}
-                    onChange={(e) => setGender(e.target.value as 'male' | 'female')}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="male">Male (পুরুষ)</option>
-                    <option value="female">Female (মহিলা)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Address * */}
+              {/* Gender (জেন্ডার) * - Required for Bus Seating logic */}
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-300 block">
-                  Address *
+                  Gender (জেন্ডার) *
                 </label>
-                <textarea
-                  rows={2}
-                  required
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Enter your permanent address..."
-                  className="w-full px-4 py-2 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
-                />
-              </div>
-
-              {/* Emergency Contact * */}
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-300 block">
-                  Emergency Contact *
-                </label>
-                <div className="relative flex items-center">
-                  <div className="absolute left-3.5 text-slate-400">
-                    <Phone className="w-4 h-4" />
-                  </div>
-                  <input
-                    type="tel"
-                    required
-                    value={emergencyContact}
-                    onChange={(e) => setEmergencyContact(e.target.value)}
-                    placeholder="01XXXXXXXXX"
-                    className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setGender('male')}
+                    className={`py-2.5 rounded-xl text-xs font-bold transition-all border ${
+                      gender === 'male'
+                        ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-600/20'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Male (পুরুষ)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGender('female')}
+                    className={`py-2.5 rounded-xl text-xs font-bold transition-all border ${
+                      gender === 'female'
+                        ? 'bg-pink-600 border-pink-500 text-white shadow-lg shadow-pink-600/20'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Female (মহিলা)
+                  </button>
                 </div>
               </div>
 
               {/* New Password * & Confirm Password * (Grid) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-300 block">
-                    New Password *
+                    Password *
                   </label>
                   <div className="relative flex items-center">
                     <div className="absolute left-3.5 text-slate-400">
@@ -894,13 +963,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 {isLoading ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
-                  <span>Create Account</span>
+                  <span>রেজিস্ট্রেশন সম্পন্ন করুন</span>
                 )}
               </button>
 
               {/* Switch to Sign In */}
               <div className="text-center pt-2 text-xs text-slate-400">
-                <span>Already have an account? </span>
+                <span>আগে থেকেই অ্যাকাউন্ট আছে? </span>
                 <button
                   type="button"
                   onClick={() => {
@@ -909,40 +978,99 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   }}
                   className="font-bold text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer ml-1"
                 >
-                  Login
+                  লগইন করুন
                 </button>
               </div>
             </form>
           )}
 
-          {/* FORGOT PASSWORD FORM */}
+          {/* FORGOT / RESET PASSWORD FORM */}
           {authMode === 'forgot' && (
             <form onSubmit={handleForgotPassword} className="space-y-4">
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-300">
-                  {language === 'EN' ? 'Email or Roll No / ID' : 'ইমেইল বা রোল নম্বর'}
+                  {language === 'EN' ? 'Class Roll *' : 'ক্লাস রোল (Class Roll) *'}
                 </label>
                 <div className="relative flex items-center">
                   <div className="absolute left-3.5 text-slate-400">
-                    <Mail className="w-4 h-4" />
+                    <GraduationCap className="w-4 h-4" />
                   </div>
                   <input
                     type="text"
                     required
                     value={emailOrId}
                     onChange={(e) => setEmailOrId(e.target.value)}
-                    placeholder="you@example.com / Roll No"
+                    placeholder={language === 'EN' ? 'Enter your Class Roll' : 'আপনার রোল নম্বর লিখুন'}
                     className="w-full pl-10 pr-4 py-3 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                   />
                 </div>
               </div>
 
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-300">
+                  {language === 'EN' ? 'New Password *' : 'নতুন পাসওয়ার্ড *'}
+                </label>
+                <div className="relative flex items-center">
+                  <div className="absolute left-3.5 text-slate-400">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full pl-10 pr-10 py-3 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3.5 text-slate-400 hover:text-slate-200"
+                  >
+                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-300">
+                  {language === 'EN' ? 'Confirm New Password *' : 'কনফার্ম নতুন পাসওয়ার্ড *'}
+                </label>
+                <div className="relative flex items-center">
+                  <div className="absolute left-3.5 text-slate-400">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full pl-10 pr-10 py-3 text-sm rounded-xl bg-slate-800/80 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3.5 text-slate-400 hover:text-slate-200"
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
               <button
                 type="submit"
-                className="w-full py-3 px-4 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                disabled={isLoading}
+                className="w-full py-3.5 px-4 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-2"
               >
-                <KeyRound className="w-4 h-4" />
-                <span>{language === 'EN' ? 'Send Reset Link' : 'রিসেট লিংক পাঠান'}</span>
+                {isLoading ? (
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <KeyRound className="w-4 h-4" />
+                    <span>{language === 'EN' ? 'Update Password' : 'পাসওয়ার্ড আপডেট করুন'}</span>
+                  </>
+                )}
               </button>
 
               <div className="text-center pt-2 text-xs text-slate-400">
@@ -954,7 +1082,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   }}
                   className="font-bold text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
                 >
-                  {language === 'EN' ? 'Back to Sign In' : 'সাইন ইন পেইজে ফিরুন'}
+                  {language === 'EN' ? '← Back to Sign In' : '← সাইন ইন পেইজে ফিরুন'}
                 </button>
               </div>
             </form>

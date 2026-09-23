@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Lock, Trash2, Plus, UserCheck, ShieldAlert, User } from 'lucide-react';
 import { UserSession } from './AuthScreen';
 import { getPublicAdminAvatar } from '../utils/adminAvatars';
-import { subscribeUsers, addUserToFirestore, disableUserInFirestore } from '../firebase';
+import { subscribeUsers, addUserToFirestore, disableUserInFirestore, deleteUserFromFirestore } from '../firebase';
 import { AppUser } from '../types';
 
 interface AdminMember {
@@ -30,9 +30,10 @@ const INITIAL_ADMINS: AdminMember[] = [
 
 interface AdminsViewProps {
   currentUser: UserSession | null;
+  onOpenAdminLogin?: () => void;
 }
 
-export const AdminsView: React.FC<AdminsViewProps> = ({ currentUser }) => {
+export const AdminsView: React.FC<AdminsViewProps> = ({ currentUser, onOpenAdminLogin }) => {
   const [admins, setAdmins] = useState<AdminMember[]>([]);
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -47,14 +48,40 @@ export const AdminsView: React.FC<AdminsViewProps> = ({ currentUser }) => {
   const isSuperAdmin = currentUser?.role === 'superadmin';
 
   useEffect(() => {
+    // Initial local backup check
+    let localBackupAdmins: any[] = [];
+    try {
+      localBackupAdmins = JSON.parse(localStorage.getItem('degree_tour_custom_admins') || '[]');
+    } catch {}
+
     const unsub = subscribeUsers((users) => {
       setAppUsers(users);
-      const localAdmins = users.filter((u) => u.role === 'admin' || u.role === 'superadmin').map((u) => ({
-        ...u,
-        role: u.role as 'admin' | 'superadmin',
-        assignedModule: u.assignedModule || 'Management Committee',
-      }));
-      setAdmins([...INITIAL_ADMINS, ...localAdmins]);
+      const localAdmins = users
+        .filter(
+          (u) =>
+            (u.role === 'admin' || u.role === 'superadmin') &&
+            !u.disabled &&
+            u.email?.toLowerCase() !== 'admin@degreetour.com'
+        )
+        .map((u) => ({
+          ...u,
+          role: u.role as 'admin' | 'superadmin',
+          assignedModule: u.assignedModule || 'Management Committee',
+        }));
+
+      // Merge local admins that might be syncing
+      const combined = [...localAdmins];
+      for (const la of localBackupAdmins) {
+        if (!combined.some((ca) => ca.id === la.id || (ca.email && ca.email.toLowerCase() === la.email.toLowerCase()))) {
+          combined.push({
+            ...la,
+            role: la.role as 'admin' | 'superadmin',
+            assignedModule: la.assignedModule || 'Management Committee',
+          });
+        }
+      }
+
+      setAdmins([...INITIAL_ADMINS, ...combined.filter(a => a.id !== 'superadmin-1')]);
     });
     return () => unsub();
   }, []);
@@ -62,21 +89,26 @@ export const AdminsView: React.FC<AdminsViewProps> = ({ currentUser }) => {
   if (currentUser?.role === 'student' || (!isSuperAdmin && currentUser?.role !== 'admin')) {
     return (
       <div className="p-8 sm:p-12 rounded-3xl bg-slate-900/90 border border-slate-800 text-center space-y-5 max-w-xl mx-auto my-12 shadow-2xl relative">
-        <div className="w-16 h-16 rounded-3xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto shadow-lg shadow-rose-500/10 shrink-0">
+        <div className="w-16 h-16 rounded-3xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/10 shrink-0">
           <Lock className="w-8 h-8" />
         </div>
         <div className="space-y-2">
-          <h2 className="text-xl sm:text-2xl font-black text-white">Access Restricted</h2>
+          <h2 className="text-xl sm:text-2xl font-black text-white">Admin Access Required</h2>
           <p className="text-xs text-slate-300 leading-relaxed">
-            এডমিন প্যানেল (Admin Panel) মডিউলটির অ্যাক্সেস শুধুমাত্র সুপার এডমিন এবং এডমিনদের জন্য সীমাবদ্ধ রাখা হয়েছে।
+            এডমিন প্যানেল (Admin Panel) এর সকল কার্যক্রম শুধুমাত্র অনুমোদিত সুপার এডমিন এবং এডমিনদের জন্য সংরক্ষিত। পরিচালনা করতে এডমিন হিসেবে লগইন করুন।
           </p>
         </div>
-        <div className="pt-2 flex justify-center">
-          <span className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-black bg-rose-500/20 text-rose-300 border border-rose-500/40">
-            <ShieldAlert className="w-4 h-4 text-rose-400" />
-            <span>Restricted for Student Role</span>
-          </span>
-        </div>
+        {onOpenAdminLogin && (
+          <div className="pt-2 flex justify-center">
+            <button
+              onClick={onOpenAdminLogin}
+              className="px-5 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-500 text-white font-extrabold text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
+            >
+              <ShieldCheck className="w-4 h-4 text-amber-400" />
+              <span>Admin Login (এডমিন হিসেবে লগইন করুন)</span>
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -84,52 +116,111 @@ export const AdminsView: React.FC<AdminsViewProps> = ({ currentUser }) => {
   // Only super admins can see the full list of other admins
   const displayAdmins = isSuperAdmin ? admins : admins.filter(a => a.role === 'superadmin' || a.id === currentUser?.id);
 
-  const handleAddAdmin = (e: React.FormEvent) => {
+  const handleAddAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isSuperAdmin) {
       setErrorMsg('শুধুমাত্র সুপার এডমিন নতুন এডমিন যুক্ত করতে পারেন।');
       return;
     }
-    if (!name || !email || !password) return;
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = phone.trim();
+    const cleanPass = password.trim();
 
-    if (password !== confirmPassword) {
+    if (!cleanName || !cleanEmail || !cleanPass) {
+      setErrorMsg('নাম, ইমেইল এবং পাসওয়ার্ড দেওয়া আবশ্যক!');
+      return;
+    }
+
+    if (cleanPass !== confirmPassword.trim()) {
       setErrorMsg('পাসওয়ার্ড এবং কনফার্ম পাসওয়ার্ড মিলছে না!');
+      return;
+    }
+
+    // Check duplicate
+    const isDuplicate = appUsers.some(
+      (u) =>
+        u.email?.trim().toLowerCase() === cleanEmail ||
+        (cleanPhone && u.phone && u.phone.replace(/[^0-9]/g, '') === cleanPhone.replace(/[^0-9]/g, ''))
+    );
+    if (isDuplicate) {
+      setErrorMsg('এই ইমেইল বা ফোন নম্বর দিয়ে ইতোমধ্যে একটি অ্যাকাউন্ট আছে!');
       return;
     }
 
     const newAdmin: AppUser = {
       id: `admin-${Date.now()}`,
-      name,
-      email: email.trim().toLowerCase(),
+      name: cleanName,
+      email: cleanEmail,
       role: 'admin',
-      assignedModule: moduleName,
-      phone: phone || '01700-000000',
-      password: password,
+      assignedModule: moduleName.trim() || 'Central Executive Committee',
+      phone: cleanPhone || '01700-000000',
+      password: cleanPass,
       rollNo: 'ADMIN-' + Math.floor(100 + Math.random() * 900)
     };
 
-    // check duplicate
-    if (appUsers.find((u) => u.email === newAdmin.email)) {
-       setErrorMsg('এই ইমেইল দিয়ে ইতোমধ্যে একটি অ্যাকাউন্ট আছে!');
-       return;
+    try {
+      await addUserToFirestore(newAdmin);
+
+      // Save to local backup for instant access
+      try {
+        const stored = JSON.parse(localStorage.getItem('degree_tour_custom_admins') || '[]');
+        const updated = [...stored.filter((a: any) => a.email !== cleanEmail), newAdmin];
+        localStorage.setItem('degree_tour_custom_admins', JSON.stringify(updated));
+      } catch (err) {
+        console.warn('Could not update localStorage backup:', err);
+      }
+
+      // Update state immediately
+      setAdmins((prev) => [
+        ...prev,
+        {
+          id: newAdmin.id,
+          name: newAdmin.name,
+          email: newAdmin.email,
+          role: 'admin',
+          assignedModule: newAdmin.assignedModule || 'Management Committee',
+          phone: newAdmin.phone || '',
+          password: newAdmin.password,
+          rollNo: newAdmin.rollNo
+        }
+      ]);
+
+      setName('');
+      setEmail('');
+      setPhone('');
+      setPassword('');
+      setConfirmPassword('');
+      setErrorMsg('');
+      setIsAddOpen(false);
+      alert(`এডমিন "${cleanName}" এর অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে!\n\nলগইন আইডি: ${cleanEmail}\nপাসওয়ার্ড: ${cleanPass}\n\nএখন এই তথ্য দিয়ে যেকোনো সময় এডমিন হিসেবে লগইন করে বাস, সিট ও সেটিংসের সবকিছু নিয়ন্ত্রণ করা যাবে।`);
+    } catch (err) {
+      console.error('Failed to create admin:', err);
+      setErrorMsg('এডমিন তৈরিতে সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
     }
-
-    addUserToFirestore(newAdmin);
-
-    setName('');
-    setEmail('');
-    setPhone('');
-    setPassword('');
-    setConfirmPassword('');
-    setErrorMsg('');
-    setIsAddOpen(false);
   };
 
-  const handleDeleteAdmin = (id: string) => {
+  const handleDeleteAdmin = async (id: string) => {
     if (!isSuperAdmin) return;
     
-    // Disable in Firestore
-    disableUserInFirestore(id);
+    const confirmDelete = window.confirm('আপনি কি নিশ্চিত যে এই এডমিন অ্যাকাউন্টটি সম্পূর্ণ মুছে ফেলতে চান?');
+    if (!confirmDelete) return;
+
+    try {
+      await deleteUserFromFirestore(id);
+      await disableUserInFirestore(id);
+
+      // Remove from local backup
+      try {
+        const stored = JSON.parse(localStorage.getItem('degree_tour_custom_admins') || '[]');
+        const filtered = stored.filter((a: any) => a.id !== id);
+        localStorage.setItem('degree_tour_custom_admins', JSON.stringify(filtered));
+      } catch {}
+
+      setAdmins((prev) => prev.filter((a) => a.id !== id));
+    } catch (err) {
+      console.error('Failed to delete admin:', err);
+    }
   };
 
   return (

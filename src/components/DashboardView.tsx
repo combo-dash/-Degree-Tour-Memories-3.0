@@ -7,9 +7,9 @@ import {
   Clock,
   XCircle,
   Wifi,
-  MapPin,
+  Bus,
   Image as ImageIcon,
-  Bell,
+  Shield,
   Crown,
   ShieldCheck,
   UserCheck
@@ -207,21 +207,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Card 6: CHECK IN COUNT */}
+        {/* Card 6: BUSES & SEATS */}
         <div
-          onClick={() => setActiveTab('tours')}
+          onClick={() => setActiveTab('buses')}
           className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-all cursor-pointer flex items-center justify-between shadow-lg"
         >
           <div>
             <p className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">
-              CHECK IN COUNT
+              BUSES & SEATS
             </p>
             <p className="text-xl sm:text-2xl font-black text-white mt-1">
-              1
+              2
             </p>
           </div>
           <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-md shrink-0">
-            <MapPin className="w-5 h-5" />
+            <Bus className="w-5 h-5" />
           </div>
         </div>
 
@@ -243,21 +243,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Card 8: NOTICE COUNT */}
+        {/* Card 8: ADMIN TEAM */}
         <div
-          onClick={() => setActiveTab('notices')}
+          onClick={() => setActiveTab('admins')}
           className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-all cursor-pointer flex items-center justify-between shadow-lg"
         >
           <div>
             <p className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">
-              NOTICE COUNT
+              ADMIN TEAM
             </p>
             <p className="text-xl sm:text-2xl font-black text-white mt-1">
-              0
+              2
             </p>
           </div>
           <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-emerald-500 text-white flex items-center justify-center shadow-md shrink-0">
-            <Bell className="w-5 h-5" />
+            <Shield className="w-5 h-5" />
           </div>
         </div>
       </div>

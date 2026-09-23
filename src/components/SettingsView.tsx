@@ -13,6 +13,7 @@ interface SettingsViewProps {
   onLogout?: () => void;
   onUpdateUserAvatar?: (newAvatarUrl: string) => void;
   onUpdateProfile?: (updatedData: Partial<UserSession>) => void;
+  onOpenAdminLogin?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -24,7 +25,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   currentUser,
   onLogout,
   onUpdateUserAvatar,
-  onUpdateProfile
+  onUpdateProfile,
+  onOpenAdminLogin
 }) => {
   const [pushNotifs, setPushNotifs] = useState(true);
   const [smsAlerts, setSmsAlerts] = useState(true);
@@ -364,13 +366,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <span>Backup Online Database</span>
           </button>
 
-          <button
-            onClick={onLogout}
-            className="w-full py-3 px-4 rounded-2xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Logout Account</span>
-          </button>
+          {currentUser ? (
+            <button
+              onClick={onLogout}
+              className="w-full py-3 px-4 rounded-2xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Logout Account</span>
+            </button>
+          ) : onOpenAdminLogin ? (
+            <button
+              onClick={onOpenAdminLogin}
+              className="w-full py-3 px-4 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
+            >
+              <Lock className="w-4 h-4 text-amber-400" />
+              <span>Admin Login (এডমিন হিসেবে লগইন করুন)</span>
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

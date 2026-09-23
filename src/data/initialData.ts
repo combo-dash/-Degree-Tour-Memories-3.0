@@ -10,10 +10,42 @@ export const INITIAL_SCHEDULE: ScheduleItem[] = [];
 
 export function createDefaultSeatsMap(capacity: number = 45): Record<string, BusSeat> {
   const seats: Record<string, BusSeat> = {};
+  
+  if (capacity === 45) {
+    // 10 standard rows (A to J) with 4 seats each (2x2) = 40 seats
+    const normalRows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+    for (const r of normalRows) {
+      for (let col = 1; col <= 4; col++) {
+        const seatId = `${r}${col}`;
+        seats[seatId] = {
+          id: seatId,
+          status: 'available'
+        };
+      }
+    }
+    // Last row (Row K) has 5 seats: K1, K2, K3 (middle/aisle), K4, K5
+    for (let col = 1; col <= 5; col++) {
+      const seatId = `K${col}`;
+      seats[seatId] = {
+        id: seatId,
+        status: 'available'
+      };
+    }
+    return seats;
+  }
+
+  // Fallback for custom capacities
   const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'];
+  const lastRowHas5 = capacity % 4 === 1;
+  const numRows = lastRowHas5 ? Math.floor(capacity / 4) : Math.ceil(capacity / 4);
   let count = 0;
-  for (const r of rows) {
-    for (let col = 1; col <= 4; col++) {
+
+  for (let rIdx = 0; rIdx < numRows; rIdx++) {
+    const r = rows[rIdx] || String.fromCharCode(65 + rIdx);
+    const isLastRow = rIdx === numRows - 1 && lastRowHas5;
+    const seatsInRow = isLastRow ? 5 : 4;
+
+    for (let col = 1; col <= seatsInRow; col++) {
       if (count >= capacity) break;
       const seatId = `${r}${col}`;
       seats[seatId] = {
@@ -22,7 +54,6 @@ export function createDefaultSeatsMap(capacity: number = 45): Record<string, Bus
       };
       count++;
     }
-    if (count >= capacity) break;
   }
   return seats;
 }
@@ -55,6 +86,25 @@ export function getNormalizedSeatsMap(bus: Partial<BusPackage>): Record<string, 
     });
   }
 
+  // Automatic Migration: If old data had 'L1', convert L1 -> K3, shift old K3 -> K4, and old K4 -> K5
+  if (existingSeatsById['L1']) {
+    const oldL1 = existingSeatsById['L1'];
+    const oldK3 = existingSeatsById['K3'];
+    const oldK4 = existingSeatsById['K4'];
+
+    delete existingSeatsById['L1'];
+
+    if (oldK4 && !existingSeatsById['K5']) {
+      existingSeatsById['K5'] = { ...oldK4, id: 'K5' };
+    }
+    if (oldK3) {
+      existingSeatsById['K4'] = { ...oldK3, id: 'K4' };
+    }
+    if (oldL1) {
+      existingSeatsById['K3'] = { ...oldL1, id: 'K3' };
+    }
+  }
+
   const finalMap: Record<string, BusSeat> = {};
   Object.keys(defaultMap).forEach((seatId) => {
     if (existingSeatsById[seatId]) {
@@ -74,6 +124,7 @@ export function getNormalizedSeatsMap(bus: Partial<BusPackage>): Record<string, 
 export function sanitizeSeatsMapForFirestore(seatsMap: Record<string, BusSeat>): Record<string, any> {
   const cleanMap: Record<string, any> = {};
   Object.keys(seatsMap).forEach((seatId) => {
+    if (seatId === 'L1') return; // Ensure obsolete L1 is never saved
     const seat = seatsMap[seatId];
     if (!seat || !seat.id) return;
 
